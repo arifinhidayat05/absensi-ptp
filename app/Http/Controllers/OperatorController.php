@@ -1,0 +1,1650 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\User;
+use App\Models\Schedule;
+use App\Models\Attendance;
+use App\Models\Leave;
+use App\Models\Setting;
+use App\Models\Holiday;
+use App\Services\AttendanceExportService;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
+use Carbon\Carbon;
+use Carbon\CarbonPeriod;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+/**
+ * Controller Portal Utama Operator Presensi
+ *
+ * Mengelola seluruh fungsi manajerial dan administrasi presensi Pengadilan Tinggi Pontianak:
+ * 1. Dashboard pemantauan statistik presensi harian secara waktu nyata (real-time).
+ * 2. Manajemen jam kerja mingguan (Senin - Jumat) serta pengaturan jadwal harian khusus.
+ * 3. Manajemen data pegawai, peserta magang kampus (NIM), dan siswa magang sekolah (NISN).
+ * 4. Rekapitulasi laporan kehadiran, ekspor berkas Excel resmi (Book1.xlsx), dan cetak PDF/A4.
+ * 5. Verifikasi, persetujuan, atau penolakan bukti foto presensi webcam.
+ * 6. Konfigurasi koordinat kantor GPS, radius geofencing, serta pejabat penandatangan laporan.
+ * 7. Manajemen dan persetujuan pengajuan permohonan cuti pegawai.
+ * 8. Pengelolaan kalender hari libur nasional & cuti bersama (tanggal merah).
+ * 9. Pengaturan profil, perubahan NIP, dan kata sandi akun operator secara mandiri.
+ */
+class OperatorController extends Controller
+{
+    /**
+     * Menampilkan dashboard utama operator presensi.
+     * Memuat ringkasan statistik kehadiran harian, status 4 jendela presensi hari ini,
+     * daftar pegawai yang sedang cuti resmi, serta presensi terbaru yang masuk.
+     *
+     * @return \Illuminate\View\View
+     */
+    public function dashboard()
+    {
+        $today = Carbon::today()->format('Y-m-d');
+        $totalKaryawan = User::where('role', 'karyawan')->count();
+
+        // Mengambil seluruh rekaman presensi hari ini diurutkan dari yang paling baru
+        $todayAttendances = Attendance::where('tanggal', $today)->with('user')->latest('waktu')->get();
+
+        // Menghitung jumlah presensi per sesi hari ini
+        $countMasuk = $todayAttendances->where('tipe', 'masuk')->count();
+        $countIstirahat = $todayAttendances->where('tipe', 'istirahat')->count();
+        $countMasukIstirahat = $todayAttendances->where('tipe', 'masuk_istirahat')->count();
+        $countPulang = $todayAttendances->where('tipe', 'pulang')->count();
+
+        $scheduleToday = Schedule::getScheduleForDate($today);
+
+        // Status jendela buka / tutup untuk 4 sesi presensi hari ini
+        $now = Carbon::now();
+        $windows = [
+            'masuk' => $scheduleToday->getWindowStatus('masuk', $now),
+            'istirahat' => $scheduleToday->getWindowStatus('istirahat', $now),
+            'masuk_istirahat' => $scheduleToday->getWindowStatus('masuk_istirahat', $now),
+            'pulang' => $scheduleToday->getWindowStatus('pulang', $now),
+        ];
+
+        // Daftar pegawai yang sedang dalam masa cuti disetujui hari ini
+        $todayLeaves = Leave::with('user')
+            ->where('status', 'disetujui')
+            ->where('tanggal_mulai', '<=', $today)
+            ->where('tanggal_selesai', '>=', $today)
+            ->get();
+        $pendingLeavesCount = Leave::where('status', 'menunggu')->count();
+
+        return view('operator.dashboard', compact(
+            'totalKaryawan',
+            'todayAttendances',
+            'countMasuk',
+            'countIstirahat',
+            'countMasukIstirahat',
+            'countPulang',
+            'scheduleToday',
+            'windows',
+            'todayLeaves',
+            'pendingLeavesCount'
+        ));
+    }
+
+    /**
+     * Menampilkan halaman pengelolaan jam kerja mingguan (Senin s/d Jumat) dan hari libur akhir pekan.
+     *
+     * @param Request $request
+     * @return \Illuminate\View\View
+     */
+    public function scheduleIndex(Request $request)
+    {
+        $selectedHari = strtolower($request->get('hari', Schedule::getHariNameIndonesian(Carbon::now()->dayOfWeekIso)));
+        if ($selectedHari === 'sabtu' || $selectedHari === 'minggu') {
+            $selectedHari = 'senin'; // Default ke hari Senin jika diakses pada akhir pekan
+        }
+
+        // Mengambil jadwal kerja untuk 7 hari dalam seminggu
+        $workDays = ['senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sabtu', 'minggu'];
+        $daySchedules = [];
+
+        foreach ($workDays as $day) {
+            $sched = Schedule::where('hari', $day)->first();
+            if (!$sched) {
+                $isWk = ($day === 'sabtu' || $day === 'minggu');
+                $sched = new Schedule([
+                    'hari' => $day,
+                    'jam_masuk' => '08:00:00',
+                    'jam_istirahat' => ($day === 'jumat') ? '11:30:00' : '12:00:00',
+                    'jam_masuk_istirahat' => '13:00:00',
+                    'jam_pulang' => ($day === 'jumat') ? '16:30:00' : '17:00:00',
+                    'is_libur' => $isWk,
+                    'keterangan' => $isWk ? 'Hari Libur' : 'Hari Kerja ' . Schedule::getHariLabel($day),
+                ]);
+            }
+            $daySchedules[$day] = $sched;
+        }
+
+        $activeSchedule = $daySchedules[$selectedHari] ?? $daySchedules['senin'];
+
+        return view('operator.schedules.index', compact('daySchedules', 'selectedHari', 'activeSchedule'));
+    }
+
+    /**
+     * Menyimpan atau memperbarui jam kerja per hari (Senin s/d Jumat).
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function scheduleStore(Request $request)
+    {
+        $validated = $request->validate([
+            'hari' => 'required|in:senin,selasa,rabu,kamis,jumat,sabtu,minggu',
+            'jam_masuk' => 'required|date_format:H:i',
+            'jam_istirahat' => 'required|date_format:H:i',
+            'jam_masuk_istirahat' => 'required|date_format:H:i',
+            'jam_pulang' => 'required|date_format:H:i',
+            'is_libur' => 'nullable|boolean',
+            'keterangan' => 'nullable|string|max:255',
+        ]);
+
+        $validated['jam_masuk'] = $validated['jam_masuk'] . ':00';
+        $validated['jam_istirahat'] = $validated['jam_istirahat'] . ':00';
+        $validated['jam_masuk_istirahat'] = $validated['jam_masuk_istirahat'] . ':00';
+        $validated['jam_pulang'] = $validated['jam_pulang'] . ':00';
+        $validated['is_libur'] = $request->has('is_libur');
+
+        Schedule::updateOrCreate(
+            ['hari' => $validated['hari']],
+            $validated
+        );
+
+        return redirect()->route('operator.schedules.index', ['hari' => $validated['hari']])
+            ->with('success', 'Pengaturan jam kerja Hari ' . Schedule::getHariLabel($validated['hari']) . ' berhasil disimpan!');
+    }
+
+    /**
+     * Menampilkan daftar master data pegawai dan peserta magang lengkap dengan fitur pencarian dan filter kategori.
+     *
+     * @param Request $request
+     * @return \Illuminate\View\View
+     */
+    public function employeeIndex(Request $request)
+    {
+        $search = $request->get('search');
+        $jenis_pegawai = $request->get('jenis_pegawai');
+        $query = User::where('role', 'karyawan');
+
+        if ($jenis_pegawai) {
+            $query->where('jenis_pegawai', $jenis_pegawai);
+        }
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('nip', 'like', "%{$search}%")
+                  ->orWhere('name', 'like', "%{$search}%")
+                  ->orWhere('jabatan', 'like', "%{$search}%")
+                  ->orWhere('asal_instansi', 'like', "%{$search}%");
+            });
+        }
+
+        $employees = $query->orderBy('name', 'asc')->paginate(15)->withQueryString();
+
+        $countAll = User::where('role', 'karyawan')->count();
+        $countPegawai = User::where('role', 'karyawan')->where('jenis_pegawai', 'pegawai')->count();
+        $countMahasiswa = User::where('role', 'karyawan')->where('jenis_pegawai', 'mahasiswa_magang')->count();
+        $countSiswa = User::where('role', 'karyawan')->where('jenis_pegawai', 'siswa_magang')->count();
+
+        return view('operator.employees.index', compact(
+            'employees',
+            'search',
+            'jenis_pegawai',
+            'countAll',
+            'countPegawai',
+            'countMahasiswa',
+            'countSiswa'
+        ));
+    }
+
+    /**
+     * Menambahkan akun pegawai atau peserta magang baru ke dalam sistem.
+     * Password akun baru diatur secara otomatis ke nilai default "password".
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function employeeStore(Request $request)
+    {
+        $validated = $request->validate([
+            'nip' => 'required|string|max:50|unique:users,nip',
+            'tipe_identitas' => 'required|in:nip,nim,nisn',
+            'jenis_pegawai' => 'required|in:pegawai,mahasiswa_magang,siswa_magang',
+            'name' => 'required|string|max:255',
+            'jabatan' => 'nullable|string|max:100',
+            'asal_instansi' => 'nullable|string|max:255',
+            'email' => 'nullable|email|unique:users,email',
+            'no_hp' => 'nullable|string|max:30',
+            'foto' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
+        ], [
+            'nip.required' => 'Nomor Identitas (NIP / NIM / NISN) wajib diisi.',
+            'nip.unique' => 'Nomor Identitas sudah terdaftar pada sistem.',
+            'name.required' => 'Nama lengkap wajib diisi.',
+            'foto.image' => 'Berkas foto harus berupa gambar.',
+            'foto.mimes' => 'Format foto harus berupa JPG, PNG, atau WEBP.',
+            'foto.max' => 'Ukuran berkas foto maksimal 2MB.',
+        ]);
+
+        if (empty($validated['jabatan'])) {
+            if ($validated['jenis_pegawai'] === 'mahasiswa_magang') {
+                $validated['jabatan'] = 'Mahasiswa Magang';
+            } elseif ($validated['jenis_pegawai'] === 'siswa_magang') {
+                $validated['jabatan'] = 'Siswa Magang';
+            } else {
+                $validated['jabatan'] = 'Pegawai';
+            }
+        }
+
+        $validated['role'] = 'karyawan';
+        $validated['password'] = Hash::make('password'); // Kata sandi bawaan awal: password
+
+        if ($request->hasFile('foto') && $request->file('foto')->isValid()) {
+            $file = $request->file('foto');
+            $imgInfo = @getimagesize($file->getRealPath());
+            if ($imgInfo === false || !in_array($imgInfo[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP])) {
+                return back()->with('error', 'Berkas yang diunggah tidak valid atau bukan gambar asli.')->withInput();
+            }
+            $folder = 'uploads/profiles';
+            $fullFolder = public_path($folder);
+            if (!File::exists($fullFolder)) {
+                File::makeDirectory($fullFolder, 0755, true, true);
+            }
+            $ext = strtolower($file->getClientOriginalExtension() ?: 'jpg');
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) {
+                $ext = 'jpg';
+            }
+            $filename = 'profile_' . time() . '_' . uniqid() . '.' . $ext;
+            $file->move($fullFolder, $filename);
+            $validated['foto'] = $folder . '/' . $filename;
+        }
+
+        User::create($validated);
+
+        return redirect()->route('operator.employees.index')
+            ->with('success', 'Data ' . $validated['name'] . ' berhasil ditambahkan! Password default: password');
+    }
+
+    /**
+     * Memperbarui profil data pegawai atau peserta magang.
+     *
+     * @param Request $request
+     * @param int $id ID akun pegawai yang diperbarui
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function employeeUpdate(Request $request, $id)
+    {
+        $employee = User::where('role', 'karyawan')->findOrFail($id);
+
+        $validated = $request->validate([
+            'nip' => 'required|string|max:50|unique:users,nip,' . $id,
+            'tipe_identitas' => 'required|in:nip,nim,nisn',
+            'jenis_pegawai' => 'required|in:pegawai,mahasiswa_magang,siswa_magang',
+            'name' => 'required|string|max:255',
+            'jabatan' => 'nullable|string|max:100',
+            'asal_instansi' => 'nullable|string|max:255',
+            'email' => 'nullable|email|unique:users,email,' . $id,
+            'no_hp' => 'nullable|string|max:30',
+            'foto' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
+        ], [
+            'nip.required' => 'Nomor Identitas (NIP / NIM / NISN) wajib diisi.',
+            'nip.unique' => 'Nomor Identitas sudah terdaftar pada sistem.',
+            'name.required' => 'Nama lengkap wajib diisi.',
+            'foto.image' => 'Berkas foto harus berupa gambar.',
+            'foto.mimes' => 'Format foto harus berupa JPG, PNG, atau WEBP.',
+            'foto.max' => 'Ukuran berkas foto maksimal 2MB.',
+        ]);
+
+        if ($request->input('hapus_foto') == '1') {
+            if ($employee->foto && File::exists(public_path($employee->foto))) {
+                File::delete(public_path($employee->foto));
+            }
+            $validated['foto'] = null;
+        } elseif ($request->hasFile('foto') && $request->file('foto')->isValid()) {
+            $folder = 'uploads/profiles';
+            $fullFolder = public_path($folder);
+            if (!File::exists($fullFolder)) {
+                File::makeDirectory($fullFolder, 0755, true, true);
+            }
+            if ($employee->foto && File::exists(public_path($employee->foto))) {
+                File::delete(public_path($employee->foto));
+            }
+            $file = $request->file('foto');
+            $imgInfo = @getimagesize($file->getRealPath());
+            if ($imgInfo === false || !in_array($imgInfo[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP])) {
+                return back()->with('error', 'Berkas yang diunggah tidak valid atau bukan gambar asli.')->withInput();
+            }
+            $ext = strtolower($file->getClientOriginalExtension() ?: 'jpg');
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) {
+                $ext = 'jpg';
+            }
+            $filename = 'profile_' . $employee->id . '_' . time() . '_' . uniqid() . '.' . $ext;
+            $file->move($fullFolder, $filename);
+            $validated['foto'] = $folder . '/' . $filename;
+        }
+
+        $employee->update($validated);
+
+        return redirect()->route('operator.employees.index')
+            ->with('success', 'Data ' . $employee->name . ' berhasil diperbarui.');
+    }
+
+    /**
+     * Melakukan reset kata sandi akun pegawai ke kata sandi default ("password").
+     * Digunakan ketika pegawai lupa kata sandinya.
+     *
+     * @param int $id ID pegawai yang direset
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function employeeResetPassword($id)
+    {
+        $employee = User::where('role', 'karyawan')->findOrFail($id);
+        $employee->update([
+            'password' => Hash::make('password'),
+        ]);
+
+        return redirect()->route('operator.employees.index')
+            ->with('success', 'Password karyawan ' . $employee->name . ' telah direset menjadi "password".');
+    }
+
+    /**
+     * Menghapus akun pegawai dari sistem.
+     *
+     * @param int $id ID pegawai yang akan dihapus
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function employeeDestroy($id)
+    {
+        $employee = User::where('role', 'karyawan')->findOrFail($id);
+        $name = $employee->name;
+
+        // Hapus berkas foto jika ada
+        if ($employee->foto && File::exists(public_path($employee->foto))) {
+            File::delete(public_path($employee->foto));
+        }
+
+        $employee->delete();
+
+        return redirect()->route('operator.employees.index')
+            ->with('success', 'Karyawan ' . $name . ' berhasil dihapus.');
+    }
+
+    /**
+     * Mengunduh berkas foto profil (PP) pegawai untuk keperluan arsip / administrasi operator.
+     *
+     * @param int $id ID pegawai yang fotonya akan diunduh
+     * @return \Symfony\Component\HttpFoundation\BinaryFileResponse|\Illuminate\Http\RedirectResponse
+     */
+    public function employeeDownloadPhoto($id)
+    {
+        $employee = User::where('role', 'karyawan')->findOrFail($id);
+
+        if (!$employee->hasFoto()) {
+            return back()->with('error', 'Pegawai ' . $employee->name . ' belum memiliki foto profil untuk diunduh.');
+        }
+
+        $fullPath = public_path($employee->foto);
+
+        if (!File::exists($fullPath)) {
+            return back()->with('error', 'Berkas foto profil tidak ditemukan pada penyimpanan server.');
+        }
+
+        $ext = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION) ?: 'jpg');
+        $safeName = Str::slug($employee->name, '_');
+        $downloadFilename = 'Foto_Profil_' . $safeName . '_' . $employee->nip . '.' . $ext;
+
+        return response()->download($fullPath, $downloadFilename);
+    }
+
+    /**
+     * Mengunduh berkas template spreadsheet Excel (.xlsx) resmi untuk keperluan import data pegawai.
+     *
+     * @return StreamedResponse
+     */
+    public function employeeTemplateExcel(): StreamedResponse
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Template Import Pegawai');
+
+        // Baris 1: Judul Kolom Header
+        $headers = [
+            'A1' => 'NOMOR IDENTITAS (NIP / NIM / NISN) *',
+            'B1' => 'NAMA LENGKAP *',
+            'C1' => 'KATEGORI STATUS *',
+            'D1' => 'JABATAN',
+            'E1' => 'ASAL KAMPUS / SEKOLAH',
+            'F1' => 'NO HP / WHATSAPP',
+            'G1' => 'EMAIL',
+        ];
+
+        foreach ($headers as $cell => $text) {
+            $sheet->setCellValue($cell, $text);
+        }
+
+        // Tata Gaya Header Tabel
+        $headerStyle = [
+            'font' => [
+                'bold' => true,
+                'color' => ['rgb' => 'FFFFFF'],
+                'size' => 10,
+            ],
+            'alignment' => [
+                'horizontal' => Alignment::HORIZONTAL_CENTER,
+                'vertical' => Alignment::VERTICAL_CENTER,
+                'wrapText' => true,
+            ],
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => '064E3B'],
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => 'D97706'],
+                ],
+            ],
+        ];
+        $sheet->getStyle('A1:G1')->applyFromArray($headerStyle);
+        $sheet->getRowDimension(1)->setRowHeight(32);
+
+        // Data Contoh Pengisian
+        $sampleData = [
+            [
+                '198507152010121002',
+                'Ahmad Pratama, S.H.',
+                'pegawai',
+                'Panitera Muda Pidana',
+                '',
+                '081234567890',
+                'ahmad.pratama@pt-pontianak.go.id',
+            ],
+            [
+                'F1081211001',
+                'Siti Rahmawati',
+                'mahasiswa_magang',
+                'Mahasiswa Magang',
+                'Universitas Tanjungpura',
+                '082198765432',
+                'siti.rahma@student.untan.ac.id',
+            ],
+            [
+                '0051234567',
+                'Budi Santoso',
+                'siswa_magang',
+                'Siswa Magang',
+                'SMKN 1 Pontianak',
+                '085211223344',
+                'budi.santoso@smk1ptk.sch.id',
+            ],
+        ];
+
+        $rowIdx = 2;
+        foreach ($sampleData as $row) {
+            $sheet->setCellValueExplicit('A' . $rowIdx, $row[0], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+            $sheet->setCellValue('B' . $rowIdx, $row[1]);
+            $sheet->setCellValue('C' . $rowIdx, $row[2]);
+            $sheet->setCellValue('D' . $rowIdx, $row[3]);
+            $sheet->setCellValue('E' . $rowIdx, $row[4]);
+            $sheet->setCellValueExplicit('F' . $rowIdx, $row[5], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+            $sheet->setCellValue('G' . $rowIdx, $row[6]);
+            $rowIdx++;
+        }
+
+        // Gaya Sel Data Contoh
+        $sheet->getStyle('A2:G4')->applyFromArray([
+            'alignment' => [
+                'vertical' => Alignment::VERTICAL_CENTER,
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => 'CBD5E1'],
+                ],
+            ],
+        ]);
+        $sheet->getStyle('A2:A4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle('C2:C4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle('F2:F4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+        // Petunjuk Tambahan di Bawah Contoh
+        $noteRow = 6;
+        $sheet->setCellValue('A' . $noteRow, 'PETUNJUK PENGISIAN IMPORT EXCEL:');
+        $sheet->getStyle('A' . $noteRow)->getFont()->setBold(true)->getColor()->setRGB('064E3B');
+
+        $notes = [
+            '1. Kolom Bertanda (*) Wajib Diisi: Nomor Identitas, Nama Lengkap, dan Kategori Status.',
+            '2. Kolom KATEGORI STATUS wajib memilih salah satu nilai: "pegawai", "mahasiswa_magang", atau "siswa_magang".',
+            '3. NIP/NIM/NISN akan otomatis menjadi Username saat login presensi.',
+            '4. Kata sandi (password) akun baru otomatis disetel ke nilai default: "password"',
+            '5. Jika NIP/NIM/NISN sudah ada di database, sistem akan memperbarui data pegawai yang bersangkutan.',
+            '6. Baris 2 sampai 4 di atas adalah baris CONTOH, Anda dapat menimpanya dengan data asli.',
+        ];
+
+        $currNoteRow = $noteRow + 1;
+        foreach ($notes as $note) {
+            $sheet->setCellValue('A' . $currNoteRow, $note);
+            $sheet->getStyle('A' . $currNoteRow)->getFont()->setSize(9)->setItalic(true)->getColor()->setRGB('475569');
+            $currNoteRow++;
+        }
+
+        // Lebar Kolom Optimal
+        $colWidths = [
+            'A' => 34,
+            'B' => 28,
+            'C' => 22,
+            'D' => 25,
+            'E' => 28,
+            'F' => 20,
+            'G' => 32,
+        ];
+        foreach ($colWidths as $col => $w) {
+            $sheet->getColumnDimension($col)->setWidth($w);
+        }
+
+        $filename = 'Template_Import_Pegawai_PT_Pontianak.xlsx';
+
+        return response()->streamDownload(function () use ($spreadsheet) {
+            $writer = new Xlsx($spreadsheet);
+            $writer->save('php://output');
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Cache-Control' => 'max-age=0',
+        ]);
+    }
+
+    /**
+     * Memproses import data pegawai / peserta magang secara massal dari berkas Excel (.xlsx, .xls, .csv).
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function employeeImportExcel(Request $request)
+    {
+        $request->validate([
+            'excel_file' => 'required|file|mimes:xlsx,xls,csv|max:5120',
+        ], [
+            'excel_file.required' => 'Silakan pilih berkas Excel yang akan diunggah.',
+            'excel_file.mimes' => 'Format berkas harus berupa Excel (.xlsx, .xls) atau CSV (.csv).',
+            'excel_file.max' => 'Ukuran berkas Excel maksimal 5MB.',
+        ]);
+
+        $file = $request->file('excel_file');
+
+        try {
+            $spreadsheet = IOFactory::load($file->getRealPath());
+            $sheet = $spreadsheet->getActiveSheet();
+            $highestRow = $sheet->getHighestRow();
+
+            $createdCount = 0;
+            $updatedCount = 0;
+            $skippedCount = 0;
+
+            for ($row = 2; $row <= $highestRow; $row++) {
+                $nip = trim((string) $sheet->getCell("A{$row}")->getValue());
+                $name = trim((string) $sheet->getCell("B{$row}")->getValue());
+                $kategoriRaw = strtolower(trim((string) $sheet->getCell("C{$row}")->getValue()));
+                $jabatan = trim((string) $sheet->getCell("D{$row}")->getValue());
+                $asalInstansi = trim((string) $sheet->getCell("E{$row}")->getValue());
+                $noHp = trim((string) $sheet->getCell("F{$row}")->getValue());
+                $email = trim((string) $sheet->getCell("G{$row}")->getValue());
+
+                // Jika baris berisi judul petunjuk atau kosong total, lewati/selesai
+                if (empty($nip) && empty($name)) {
+                    continue;
+                }
+
+                if (str_starts_with(strtoupper($nip), 'PETUNJUK') || str_starts_with(strtoupper($nip), 'CATATAN')) {
+                    break;
+                }
+
+                if (empty($nip) || empty($name)) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                // Tentukan tipe_identitas dan jenis_pegawai
+                if (str_contains($kategoriRaw, 'mahasiswa') || str_contains($kategoriRaw, 'kuliah') || str_contains($kategoriRaw, 'nim')) {
+                    $jenisPegawai = 'mahasiswa_magang';
+                    $tipeIdentitas = 'nim';
+                } elseif (str_contains($kategoriRaw, 'siswa') || str_contains($kategoriRaw, 'smk') || str_contains($kategoriRaw, 'sma') || str_contains($kategoriRaw, 'nisn')) {
+                    $jenisPegawai = 'siswa_magang';
+                    $tipeIdentitas = 'nisn';
+                } else {
+                    $jenisPegawai = 'pegawai';
+                    $tipeIdentitas = 'nip';
+                }
+
+                if (empty($jabatan)) {
+                    if ($jenisPegawai === 'mahasiswa_magang') {
+                        $jabatan = 'Mahasiswa Magang';
+                    } elseif ($jenisPegawai === 'siswa_magang') {
+                        $jabatan = 'Siswa Magang';
+                    } else {
+                        $jabatan = 'Pegawai';
+                    }
+                }
+
+                // Periksa email agar tidak duplikat jika diisi
+                $emailToSave = !empty($email) ? $email : null;
+                if ($emailToSave) {
+                    $existingEmailUser = User::where('email', $emailToSave)->where('nip', '!=', $nip)->first();
+                    if ($existingEmailUser) {
+                        $emailToSave = null;
+                    }
+                }
+
+                $user = User::where('nip', $nip)->first();
+
+                if ($user) {
+                    // Update data pegawai yang sudah ada
+                    $updateData = [
+                        'name' => $name,
+                        'tipe_identitas' => $tipeIdentitas,
+                        'jenis_pegawai' => $jenisPegawai,
+                        'jabatan' => $jabatan,
+                    ];
+                    if (!empty($asalInstansi)) {
+                        $updateData['asal_instansi'] = $asalInstansi;
+                    }
+                    if (!empty($noHp)) {
+                        $updateData['no_hp'] = $noHp;
+                    }
+                    if ($emailToSave) {
+                        $updateData['email'] = $emailToSave;
+                    }
+                    $user->update($updateData);
+                    $updatedCount++;
+                } else {
+                    // Buat akun pegawai baru
+                    User::create([
+                        'nip' => $nip,
+                        'tipe_identitas' => $tipeIdentitas,
+                        'jenis_pegawai' => $jenisPegawai,
+                        'name' => $name,
+                        'jabatan' => $jabatan,
+                        'asal_instansi' => !empty($asalInstansi) ? $asalInstansi : null,
+                        'no_hp' => !empty($noHp) ? $noHp : null,
+                        'email' => $emailToSave,
+                        'role' => 'karyawan',
+                        'password' => Hash::make('password'),
+                    ]);
+                    $createdCount++;
+                }
+            }
+
+            $msg = "Import data pegawai berhasil! ({$createdCount} data baru ditambahkan, {$updatedCount} data diperbarui)";
+            if ($skippedCount > 0) {
+                $msg .= ". {$skippedCount} baris tidak lengkap dilewati.";
+            }
+
+            return redirect()->route('operator.employees.index')->with('success', $msg);
+        } catch (\Exception $e) {
+            return redirect()->route('operator.employees.index')
+                ->with('error', 'Gagal memproses berkas Excel: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Menampilkan rekapitulasi data laporan presensi dengan filter rentang tanggal, jenis sesi, status verifikasi, dan pegawai.
+     *
+     * @param Request $request
+     * @return \Illuminate\View\View
+     */
+    public function attendanceReports(Request $request)
+    {
+        $tanggal_mulai = $request->get('tanggal_mulai');
+        $tanggal_selesai = $request->get('tanggal_selesai');
+
+        // Nilai fallback jika hanya 1 tanggal yang dikirimkan
+        if (!$tanggal_mulai && $request->has('tanggal')) {
+            $tanggal_mulai = $request->get('tanggal');
+            $tanggal_selesai = $request->get('tanggal');
+        }
+
+        // Standar bawaan: awal bulan berjalan hingga hari ini
+        if (!$tanggal_mulai) {
+            $tanggal_mulai = Carbon::now()->startOfMonth()->format('Y-m-d');
+        }
+        if (!$tanggal_selesai) {
+            $tanggal_selesai = Carbon::today()->format('Y-m-d');
+        }
+
+        $tipe = $request->get('tipe');
+        $user_id = $request->get('user_id');
+        $approval_status = $request->get('approval_status');
+
+        $query = Attendance::with('user');
+
+        if ($tanggal_mulai && $tanggal_selesai) {
+            $query->whereBetween('tanggal', [$tanggal_mulai, $tanggal_selesai]);
+        } elseif ($tanggal_mulai) {
+            $query->where('tanggal', '>=', $tanggal_mulai);
+        } elseif ($tanggal_selesai) {
+            $query->where('tanggal', '<=', $tanggal_selesai);
+        }
+
+        if ($tipe) {
+            $query->where('tipe', $tipe);
+        }
+
+        if ($user_id) {
+            $query->where('user_id', $user_id);
+        }
+
+        if ($approval_status) {
+            $query->where('approval_status', $approval_status);
+        }
+
+        // Akumulasi metrik ringkasan untuk periode yang difilter
+        $cloneQuery = clone $query;
+        $totalPresensi = $cloneQuery->count();
+        $totalDiterima = (clone $query)->where('approval_status', 'diterima')->count();
+        $totalDitolak = (clone $query)->where('approval_status', 'ditolak')->count();
+        $totalTerlambat = (clone $query)->where('status', 'terlambat')->count();
+
+        $attendances = $query->orderBy('tanggal', 'desc')->orderBy('waktu', 'desc')->paginate(25)->withQueryString();
+        $employees = User::where('role', 'karyawan')->orderBy('name', 'asc')->get();
+
+        return view('operator.reports.index', compact(
+            'attendances',
+            'employees',
+            'tanggal_mulai',
+            'tanggal_selesai',
+            'tipe',
+            'user_id',
+            'approval_status',
+            'totalPresensi',
+            'totalDiterima',
+            'totalDitolak',
+            'totalTerlambat'
+        ));
+    }
+
+    /**
+     * Mengekspor rekapitulasi data presensi ke dalam berkas format Excel resmi (Book1.xlsx).
+     *
+     * @param Request $request
+     * @return \Symfony\Component\HttpFoundation\StreamedResponse
+     */
+    public function exportReports(Request $request)
+    {
+        $tanggal_mulai = $request->get('tanggal_mulai', Carbon::now()->startOfMonth()->format('Y-m-d'));
+        $tanggal_selesai = $request->get('tanggal_selesai', Carbon::today()->format('Y-m-d'));
+        $user_id = $request->get('user_id');
+
+        $exportService = new AttendanceExportService();
+        return $exportService->exportBook1Format(
+            $tanggal_mulai,
+            $tanggal_selesai,
+            $user_id ? (int)$user_id : null
+        );
+    }
+
+    /**
+     * Menampilkan halaman cetak laporan resmi A4 lengkap dengan Kop Surat resmi Mahkamah Agung RI,
+     * tabel rekapitulasi / matriks timesheet harian, serta blok tanda tangan basah pimpinan.
+     * Mode tampilan otomatis menyesuaikan:
+     * - Cetak Seluruh Pegawai: Rekapitulasi tabel matriks bulanan seluruh pegawai.
+     * - Cetak 1 Pegawai: Lembar Timesheet harian (tanggal per tanggal) lengkap dengan tanda tangan ganda (Pimpinan & Pegawai).
+     *
+     * @param Request $request
+     * @return \Illuminate\View\View
+     */
+    public function printReports(Request $request)
+    {
+        $tanggal_mulai = $request->get('tanggal_mulai', Carbon::now()->startOfMonth()->format('Y-m-d'));
+        $tanggal_selesai = $request->get('tanggal_selesai', Carbon::today()->format('Y-m-d'));
+        $user_id = $request->get('user_id');
+
+        $start = Carbon::parse($tanggal_mulai)->startOfDay();
+        $end = Carbon::parse($tanggal_selesai)->endOfDay();
+        $today = Carbon::today();
+        $period = CarbonPeriod::create($start, $end);
+
+        $singleEmployee = null;
+        $dailyRecords = [];
+
+        if ($user_id) {
+            $singleEmployee = User::where('id', $user_id)->where('role', 'karyawan')->first();
+            $employees = $singleEmployee ? collect([$singleEmployee]) : User::where('role', 'karyawan')->orderBy('name', 'asc')->get();
+        } else {
+            $employees = User::where('role', 'karyawan')->orderBy('name', 'asc')->get();
+        }
+
+        $employeeStats = [];
+
+        foreach ($employees as $emp) {
+            $countMasuk = 0;
+            $countIstirahat = 0;
+            $countMasukIstirahat = 0;
+            $countPulang = 0;
+
+            $countTepatWaktu = 0;
+            $countTerlambat = 0;
+            $countLebihAwal = 0;
+            $countDitolak = 0;
+            $countTanpaKeterangan = 0;
+
+            $countCutiTahunan = 0;
+            $countCutiSakit = 0;
+            $countCutiLN = 0;
+            $countCutiLainnya = 0;
+            $totalHariKerja = 0;
+
+            foreach ($period as $date) {
+                $dateStr = $date->format('Y-m-d');
+
+                if ($date->gt($today)) {
+                    continue;
+                }
+
+                $schedule = Schedule::getScheduleForDate($dateStr);
+                if ($schedule->is_libur) {
+                    continue;
+                }
+
+                $totalHariKerja++;
+                $approvedLeave = Leave::getUserLeaveOnDate($emp->id, $dateStr);
+
+                $allDayAttendances = Attendance::where('user_id', $emp->id)
+                    ->where('tanggal', $dateStr)
+                    ->get();
+
+                $approvedAttendances = $allDayAttendances->where('approval_status', 'diterima');
+                $rejectedAttendances = $allDayAttendances->where('approval_status', 'ditolak');
+
+                if ($allDayAttendances->isEmpty()) {
+                    if ($approvedLeave) {
+                        if ($approvedLeave->jenis_cuti === 'cuti_tahunan') $countCutiTahunan++;
+                        elseif ($approvedLeave->jenis_cuti === 'cuti_sakit') $countCutiSakit++;
+                        elseif ($approvedLeave->jenis_cuti === 'cuti_luar_negeri') $countCutiLN++;
+                        else $countCutiLainnya++;
+                    } else {
+                        $countTanpaKeterangan++;
+                    }
+                } else {
+                    if ($approvedAttendances->firstWhere('tipe', 'masuk')) $countMasuk++;
+                    if ($approvedAttendances->firstWhere('tipe', 'istirahat')) $countIstirahat++;
+                    if ($approvedAttendances->firstWhere('tipe', 'masuk_istirahat')) $countMasukIstirahat++;
+                    if ($approvedAttendances->firstWhere('tipe', 'pulang')) $countPulang++;
+
+                    foreach ($approvedAttendances as $att) {
+                        if ($att->status === 'tepat_waktu') $countTepatWaktu++;
+                        elseif ($att->status === 'terlambat') $countTerlambat++;
+                        elseif ($att->status === 'lebih_awal') $countLebihAwal++;
+                    }
+
+                    $countDitolak += $rejectedAttendances->count();
+                }
+            }
+
+            $keteranganParts = [];
+            if ($countCutiTahunan > 0) $keteranganParts[] = "Cuti Tahunan: {$countCutiTahunan} hr";
+            if ($countCutiSakit > 0) $keteranganParts[] = "Cuti Sakit: {$countCutiSakit} hr";
+            if ($countCutiLN > 0) $keteranganParts[] = "Cuti LN: {$countCutiLN} hr";
+            if ($countCutiLainnya > 0) $keteranganParts[] = "Cuti Lainnya: {$countCutiLainnya} hr";
+            $keteranganText = implode(', ', $keteranganParts);
+
+            $employeeStats[] = [
+                'user' => $emp,
+                'total_hari_kerja' => $totalHariKerja,
+                'masuk' => $countMasuk,
+                'istirahat' => $countIstirahat,
+                'masuk_istirahat' => $countMasukIstirahat,
+                'pulang' => $countPulang,
+                'tepat_waktu' => $countTepatWaktu,
+                'terlambat' => $countTerlambat,
+                'lebih_awal' => $countLebihAwal,
+                'ditolak' => $countDitolak,
+                'tanpa_keterangan' => $countTanpaKeterangan,
+                'cuti_total' => ($countCutiTahunan + $countCutiSakit + $countCutiLN + $countCutiLainnya),
+                'keterangan' => $keteranganText,
+            ];
+        }
+
+        // If a single employee is selected, build the day-by-day timesheet records
+        if ($singleEmployee) {
+            foreach ($period as $date) {
+                $dateStr = $date->format('Y-m-d');
+                $schedule = Schedule::getScheduleForDate($dateStr);
+                $isFuture = $date->gt($today);
+                $approvedLeave = Leave::getUserLeaveOnDate($singleEmployee->id, $dateStr);
+
+                $dayAttendances = Attendance::where('user_id', $singleEmployee->id)
+                    ->where('tanggal', $dateStr)
+                    ->get();
+
+                $masuk = $dayAttendances->firstWhere('tipe', 'masuk');
+                $istirahat = $dayAttendances->firstWhere('tipe', 'istirahat');
+                $masukIst = $dayAttendances->firstWhere('tipe', 'masuk_istirahat');
+                $pulang = $dayAttendances->firstWhere('tipe', 'pulang');
+
+                // Determine day status & badge class
+                $statusHarian = '';
+                $statusBadgeClass = '';
+
+                if ($schedule->is_libur) {
+                    $statusHarian = 'Libur (' . ($schedule->keterangan_libur ?: 'Akhir Pekan') . ')';
+                    $statusBadgeClass = 'libur';
+                } elseif ($approvedLeave) {
+                    $statusHarian = Leave::getJenisCutiLabel($approvedLeave->jenis_cuti);
+                    $statusBadgeClass = 'cuti';
+                } elseif ($dayAttendances->isEmpty()) {
+                    if ($isFuture) {
+                        $statusHarian = '-';
+                        $statusBadgeClass = 'future';
+                    } else {
+                        $statusHarian = 'Tanpa Keterangan (ALFA)';
+                        $statusBadgeClass = 'alfa';
+                    }
+                } else {
+                    $rejected = $dayAttendances->where('approval_status', 'ditolak');
+                    if ($rejected->isNotEmpty()) {
+                        $statusHarian = 'Ditolak: ' . ($rejected->first()->catatan_operator ?: 'Foto Invalid');
+                        $statusBadgeClass = 'ditolak';
+                    } else {
+                        $hasLate = $dayAttendances->contains('status', 'terlambat');
+                        if ($hasLate) {
+                            $statusHarian = 'Hadir (Terlambat)';
+                            $statusBadgeClass = 'terlambat';
+                        } else {
+                            $statusHarian = 'Hadir (Tepat Waktu)';
+                            $statusBadgeClass = 'hadir';
+                        }
+                    }
+                }
+
+                $dailyRecords[] = [
+                    'date' => $date,
+                    'date_str' => $dateStr,
+                    'hari' => $date->translatedFormat('l'),
+                    'tanggal_formatted' => $date->translatedFormat('d M Y'),
+                    'is_libur' => $schedule->is_libur,
+                    'is_future' => $isFuture,
+                    'masuk' => $masuk,
+                    'istirahat' => $istirahat,
+                    'masuk_istirahat' => $masukIst,
+                    'pulang' => $pulang,
+                    'leave' => $approvedLeave,
+                    'status_harian' => $statusHarian,
+                    'status_badge_class' => $statusBadgeClass,
+                ];
+            }
+        }
+
+        $setting = Setting::getOfficeSetting();
+
+        return view('operator.reports.print', compact(
+            'employeeStats',
+            'singleEmployee',
+            'dailyRecords',
+            'setting',
+            'tanggal_mulai',
+            'tanggal_selesai',
+            'user_id'
+        ));
+    }
+
+    /**
+     * Menampilkan halaman konfigurasi titik koordinat GPS kantor, batas radius toleransi, dan identitas Ketua Pengadilan.
+     *
+     * @return \Illuminate\View\View
+     */
+    public function locationSettingsIndex()
+    {
+        $setting = Setting::getOfficeSetting();
+        return view('operator.settings.location', compact('setting'));
+    }
+
+    /**
+     * Memperbarui pengaturan instansi, titik koordinat kantor, radius geofencing, serta data pejabat penandatangan laporan.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function locationSettingsUpdate(Request $request)
+    {
+        $validated = $request->validate([
+            'nama_kantor' => 'required|string|max:255',
+            'nama_ketua' => 'required|string|max:255',
+            'jabatan_ketua' => 'required|string|max:255',
+            'nip_ketua' => 'nullable|string|max:100',
+            'satker_name' => 'required|string|max:255',
+            'kota_surat' => 'required|string|max:100',
+            'latitude_kantor' => 'required|numeric',
+            'longitude_kantor' => 'required|numeric',
+            'radius_meter' => 'required|integer|min:10|max:10000',
+            'enforce_radius' => 'nullable|boolean',
+        ], [
+            'nama_kantor.required' => 'Nama kantor wajib diisi.',
+            'nama_ketua.required' => 'Nama Ketua / Pejabat Penandatangan wajib diisi.',
+            'jabatan_ketua.required' => 'Jabatan Penandatangan wajib diisi.',
+            'satker_name.required' => 'Nama Satker wajib diisi.',
+            'kota_surat.required' => 'Kota surat dokumen wajib diisi.',
+            'latitude_kantor.required' => 'Latitude kantor wajib ditentukan di peta.',
+            'longitude_kantor.required' => 'Longitude kantor wajib ditentukan di peta.',
+            'radius_meter.required' => 'Batas radius (meter) wajib diisi.',
+        ]);
+
+        $validated['enforce_radius'] = $request->has('enforce_radius');
+
+        $setting = Setting::getOfficeSetting();
+        $setting->update($validated);
+
+        return redirect()->route('operator.location.index')
+            ->with('success', 'Pengaturan Instansi, Nama Ketua & Lokasi Kantor berhasil disimpan!');
+    }
+
+    /**
+     * Menolak rekaman presensi pegawai (misal foto wajah tidak valid, gelap, atau bukan wajah pegawai).
+     * Presensi yang ditolak otomatis dianggap tidak hadir (ALFA).
+     *
+     * @param int $id ID rekaman presensi yang ditolak
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
+     */
+    public function rejectAttendance($id, Request $request)
+    {
+        $attendance = Attendance::with('user')->findOrFail($id);
+        $reason = $request->get('catatan_operator', 'Wajah foto tidak sesuai / tidak valid');
+
+        $attendance->update([
+            'approval_status' => 'ditolak',
+            'catatan_operator' => $reason,
+        ]);
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Presensi karyawan ' . $attendance->user->name . ' telah DITOLAK (Dianggap ALFA / Belum Absen).'
+            ]);
+        }
+
+        return back()->with('success', 'Presensi karyawan ' . $attendance->user->name . ' telah DITOLAK (Dianggap ALFA / Belum Absen).');
+    }
+
+    /**
+     * Menyetujui atau memulihkan kembali rekaman presensi pegawai yang sebelumnya berstatus ditolak.
+     *
+     * @param int $id ID presensi yang disetujui
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
+     */
+    public function approveAttendance($id, Request $request)
+    {
+        $attendance = Attendance::with('user')->findOrFail($id);
+
+        $attendance->update([
+            'approval_status' => 'diterima',
+            'catatan_operator' => null,
+        ]);
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Presensi karyawan ' . $attendance->user->name . ' telah DITERIMA.'
+            ]);
+        }
+
+        return back()->with('success', 'Presensi karyawan ' . $attendance->user->name . ' telah DITERIMA.');
+    }
+
+    /**
+     * Menampilkan daftar seluruh pengajuan izin cuti pegawai (Cuti Tahunan, Sakit, Luar Negeri, Alasan Penting).
+     *
+     * @param Request $request
+     * @return \Illuminate\View\View
+     */
+    public function leaveIndex(Request $request)
+    {
+        $jenis_cuti = $request->get('jenis_cuti');
+        $status = $request->get('status');
+        $user_id = $request->get('user_id');
+        $search = $request->get('search');
+
+        $query = Leave::with('user');
+
+        if ($jenis_cuti) {
+            $query->where('jenis_cuti', $jenis_cuti);
+        }
+
+        if ($status) {
+            $query->where('status', $status);
+        }
+
+        if ($user_id) {
+            $query->where('user_id', $user_id);
+        }
+
+        if ($search) {
+            $query->whereHas('user', function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('nip', 'like', "%{$search}%");
+            });
+        }
+
+        $leaves = $query->orderBy('tanggal_mulai', 'desc')->paginate(15)->withQueryString();
+        $employees = User::where('role', 'karyawan')->orderBy('name', 'asc')->get();
+
+        // Summary Counts
+        $totalAllLeaves = Leave::count();
+        $totalCutiTahunan = Leave::where('jenis_cuti', 'cuti_tahunan')->where('status', 'disetujui')->count();
+        $totalCutiSakit = Leave::where('jenis_cuti', 'cuti_sakit')->where('status', 'disetujui')->count();
+        $totalCutiLuarNegeri = Leave::where('jenis_cuti', 'cuti_luar_negeri')->where('status', 'disetujui')->count();
+        $totalMenunggu = Leave::where('status', 'menunggu')->count();
+
+        // Today Active Leaves Count
+        $today = Carbon::today()->format('Y-m-d');
+        $totalActiveToday = Leave::where('status', 'disetujui')
+            ->where('tanggal_mulai', '<=', $today)
+            ->where('tanggal_selesai', '>=', $today)
+            ->count();
+
+        return view('operator.leaves.index', compact(
+            'leaves',
+            'employees',
+            'jenis_cuti',
+            'status',
+            'user_id',
+            'search',
+            'totalAllLeaves',
+            'totalCutiTahunan',
+            'totalCutiSakit',
+            'totalCutiLuarNegeri',
+            'totalMenunggu',
+            'totalActiveToday'
+        ));
+    }
+
+    /**
+     * Menyimpan data pengajuan izin cuti pegawai baru yang diinputkan oleh operator.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function leaveStore(Request $request)
+    {
+        $validated = $request->validate([
+            'user_id' => 'required|exists:users,id',
+            'jenis_cuti' => 'required|in:cuti_tahunan,cuti_sakit,cuti_luar_negeri,cuti_alasan_penting,cuti_lainnya',
+            'tanggal_mulai' => 'required|date',
+            'tanggal_selesai' => 'required|date|after_or_equal:tanggal_mulai',
+            'alasan' => 'nullable|string|max:1000',
+            'status' => 'required|in:disetujui,menunggu,ditolak',
+            'dokumen' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
+            'catatan_operator' => 'nullable|string|max:500',
+        ], [
+            'user_id.required' => 'Pegawai wajib dipilih.',
+            'jenis_cuti.required' => 'Jenis cuti wajib dipilih.',
+            'tanggal_mulai.required' => 'Tanggal mulai cuti wajib diisi.',
+            'tanggal_selesai.required' => 'Tanggal selesai cuti wajib diisi.',
+            'tanggal_selesai.after_or_equal' => 'Tanggal selesai tidak boleh sebelum tanggal mulai.',
+            'dokumen.max' => 'Ukuran file dokumen pendukung maksimal 5MB.',
+        ]);
+
+        $start = Carbon::parse($validated['tanggal_mulai']);
+        $end = Carbon::parse($validated['tanggal_selesai']);
+        $jumlahHari = $start->diffInDays($end) + 1;
+
+        $docPath = null;
+        if ($request->hasFile('dokumen') && $request->file('dokumen')->isValid()) {
+            $folder = 'uploads/dokumen_cuti';
+            $fullFolder = public_path($folder);
+            if (!File::exists($fullFolder)) {
+                File::makeDirectory($fullFolder, 0755, true, true);
+            }
+            $file = $request->file('dokumen');
+            $filename = 'cuti_' . $validated['user_id'] . '_' . time() . '.' . $file->getClientOriginalExtension();
+            $file->move($fullFolder, $filename);
+            $docPath = $folder . '/' . $filename;
+        }
+
+        Leave::create([
+            'user_id' => $validated['user_id'],
+            'jenis_cuti' => $validated['jenis_cuti'],
+            'tanggal_mulai' => $validated['tanggal_mulai'],
+            'tanggal_selesai' => $validated['tanggal_selesai'],
+            'jumlah_hari' => $jumlahHari,
+            'alasan' => $validated['alasan'] ?? null,
+            'dokumen_pendukung' => $docPath,
+            'status' => $validated['status'],
+            'catatan_operator' => $validated['catatan_operator'] ?? null,
+        ]);
+
+        return redirect()->route('operator.leaves.index')
+            ->with('success', 'Data Cuti Pegawai berhasil dicatat!');
+    }
+
+    /**
+     * Memperbarui rekaman data izin cuti pegawai.
+     *
+     * @param int $id ID izin cuti yang diperbarui
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function leaveUpdate($id, Request $request)
+    {
+        $leave = Leave::findOrFail($id);
+
+        $validated = $request->validate([
+            'user_id' => 'required|exists:users,id',
+            'jenis_cuti' => 'required|in:cuti_tahunan,cuti_sakit,cuti_luar_negeri,cuti_alasan_penting,cuti_lainnya',
+            'tanggal_mulai' => 'required|date',
+            'tanggal_selesai' => 'required|date|after_or_equal:tanggal_mulai',
+            'alasan' => 'nullable|string|max:1000',
+            'status' => 'required|in:disetujui,menunggu,ditolak',
+            'dokumen' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
+            'catatan_operator' => 'nullable|string|max:500',
+        ]);
+
+        $start = Carbon::parse($validated['tanggal_mulai']);
+        $end = Carbon::parse($validated['tanggal_selesai']);
+        $jumlahHari = $start->diffInDays($end) + 1;
+
+        $docPath = $leave->dokumen_pendukung;
+        if ($request->hasFile('dokumen') && $request->file('dokumen')->isValid()) {
+            $folder = 'uploads/dokumen_cuti';
+            $fullFolder = public_path($folder);
+            if (!File::exists($fullFolder)) {
+                File::makeDirectory($fullFolder, 0755, true, true);
+            }
+            $file = $request->file('dokumen');
+            $filename = 'cuti_' . $validated['user_id'] . '_' . time() . '.' . $file->getClientOriginalExtension();
+            $file->move($fullFolder, $filename);
+            $docPath = $folder . '/' . $filename;
+        }
+
+        $leave->update([
+            'user_id' => $validated['user_id'],
+            'jenis_cuti' => $validated['jenis_cuti'],
+            'tanggal_mulai' => $validated['tanggal_mulai'],
+            'tanggal_selesai' => $validated['tanggal_selesai'],
+            'jumlah_hari' => $jumlahHari,
+            'alasan' => $validated['alasan'] ?? null,
+            'dokumen_pendukung' => $docPath,
+            'status' => $validated['status'],
+            'catatan_operator' => $validated['catatan_operator'] ?? null,
+        ]);
+
+        return redirect()->route('operator.leaves.index')
+            ->with('success', 'Data Cuti Pegawai berhasil diperbarui!');
+    }
+
+    /**
+     * Menghapus rekaman izin cuti serta berkas lampiran pendukungnya dari penyimpanan server.
+     *
+     * @param int $id ID izin cuti yang dihapus
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function leaveDestroy($id)
+    {
+        $leave = Leave::findOrFail($id);
+        if ($leave->dokumen_pendukung && File::exists(public_path($leave->dokumen_pendukung))) {
+            File::delete(public_path($leave->dokumen_pendukung));
+        }
+        $leave->delete();
+
+        return redirect()->route('operator.leaves.index')
+            ->with('success', 'Data Cuti berhasil dihapus.');
+    }
+
+    /**
+     * Menyetujui (approve) permohonan izin cuti yang diajukan oleh pegawai.
+     *
+     * @param int $id ID izin cuti
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function leaveApprove($id)
+    {
+        $leave = Leave::with('user')->findOrFail($id);
+        $leave->update([
+            'status' => 'disetujui',
+            'catatan_operator' => null,
+        ]);
+
+        return back()->with('success', 'Pengajuan Cuti ' . Leave::getJenisCutiLabel($leave->jenis_cuti) . ' untuk ' . $leave->user->name . ' telah DISETUJUI.');
+    }
+
+    /**
+     * Menolak (reject) permohonan izin cuti yang diajukan oleh pegawai disertai catatan alasan penolakan.
+     *
+     * @param int $id ID izin cuti
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function leaveReject($id, Request $request)
+    {
+        $leave = Leave::with('user')->findOrFail($id);
+        $reason = $request->get('catatan_operator', 'Pengajuan cuti ditolak operator');
+
+        $leave->update([
+            'status' => 'ditolak',
+            'catatan_operator' => $reason,
+        ]);
+
+        return back()->with('success', 'Pengajuan Cuti untuk ' . $leave->user->name . ' telah DITOLAK.');
+    }
+
+    /**
+     * Menampilkan daftar hari libur nasional dan cuti bersama (tanggal merah) per tahun.
+     *
+     * @param Request $request
+     * @return \Illuminate\View\View
+     */
+    public function holidayIndex(Request $request)
+    {
+        $year = (int)$request->get('year', Carbon::now()->year);
+        $search = $request->get('search');
+
+        $query = Holiday::query()
+            ->whereYear('tanggal', $year)
+            ->orderBy('tanggal', 'asc');
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('nama', 'like', "%{$search}%")
+                  ->orWhere('keterangan', 'like', "%{$search}%")
+                  ->orWhere('tanggal', 'like', "%{$search}%");
+            });
+        }
+
+        $holidays = $query->paginate(25)->withQueryString();
+
+        // Count totals
+        $totalHolidays = Holiday::whereYear('tanggal', $year)->count();
+        $totalUpcoming = Holiday::whereYear('tanggal', $year)->whereDate('tanggal', '>=', Carbon::today())->count();
+
+        // Available years for filter
+        $availableYears = Holiday::selectRaw('YEAR(tanggal) as year')
+            ->distinct()
+            ->pluck('year')
+            ->toArray();
+        if (!in_array($year, $availableYears)) {
+            $availableYears[] = $year;
+        }
+        if (!in_array(2026, $availableYears)) {
+            $availableYears[] = 2026;
+        }
+        sort($availableYears);
+
+        return view('operator.holidays.index', compact(
+            'holidays',
+            'year',
+            'search',
+            'totalHolidays',
+            'totalUpcoming',
+            'availableYears'
+        ));
+    }
+
+    /**
+     * Menyimpan data tanggal merah / hari libur baru ke dalam sistem.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function holidayStore(Request $request)
+    {
+        $validated = $request->validate([
+            'tanggal' => 'required|date|unique:holidays,tanggal',
+            'nama' => 'required|string|max:255',
+            'keterangan' => 'nullable|string|max:255',
+        ], [
+            'tanggal.required' => 'Tanggal libur wajib diisi.',
+            'tanggal.unique' => 'Tanggal tersebut sudah terdaftar sebagai hari libur.',
+            'nama.required' => 'Nama hari libur wajib diisi.',
+        ]);
+
+        $holiday = Holiday::create([
+            'tanggal' => $validated['tanggal'],
+            'nama' => $validated['nama'],
+            'keterangan' => $validated['keterangan'] ?? 'Hari Libur Nasional',
+            'is_libur_nasional' => true,
+        ]);
+
+        $year = Carbon::parse($holiday->tanggal)->year;
+
+        return redirect()->route('operator.holidays.index', ['year' => $year])
+            ->with('success', 'Hari libur "' . $holiday->nama . '" (' . Carbon::parse($holiday->tanggal)->translatedFormat('d F Y') . ') berhasil ditambahkan!');
+    }
+
+    /**
+     * Memperbarui rincian data hari libur nasional atau cuti bersama.
+     *
+     * @param Request $request
+     * @param int $id ID hari libur yang diperbarui
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function holidayUpdate(Request $request, $id)
+    {
+        $holiday = Holiday::findOrFail($id);
+
+        $validated = $request->validate([
+            'tanggal' => 'required|date|unique:holidays,tanggal,' . $holiday->id,
+            'nama' => 'required|string|max:255',
+            'keterangan' => 'nullable|string|max:255',
+        ], [
+            'tanggal.required' => 'Tanggal libur wajib diisi.',
+            'tanggal.unique' => 'Tanggal tersebut sudah terdaftar pada hari libur lain.',
+            'nama.required' => 'Nama hari libur wajib diisi.',
+        ]);
+
+        $holiday->update([
+            'tanggal' => $validated['tanggal'],
+            'nama' => $validated['nama'],
+            'keterangan' => $validated['keterangan'] ?? 'Hari Libur Nasional',
+        ]);
+
+        $year = Carbon::parse($holiday->tanggal)->year;
+
+        return redirect()->route('operator.holidays.index', ['year' => $year])
+            ->with('success', 'Data hari libur "' . $holiday->nama . '" berhasil diperbarui!');
+    }
+
+    /**
+     * Menghapus rekaman hari libur dari kalender sistem.
+     *
+     * @param int $id ID hari libur yang dihapus
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function holidayDestroy($id)
+    {
+        $holiday = Holiday::findOrFail($id);
+        $nama = $holiday->nama;
+        $tgl = Carbon::parse($holiday->tanggal)->translatedFormat('d F Y');
+        $year = Carbon::parse($holiday->tanggal)->year;
+
+        $holiday->delete();
+
+        return redirect()->route('operator.holidays.index', ['year' => $year])
+            ->with('success', 'Hari libur "' . $nama . '" (' . $tgl . ') berhasil dihapus!');
+    }
+
+    /**
+     * Mengisi secara otomatis daftar resmi Hari Libur Nasional & Cuti Bersama Republik Indonesia
+     * untuk tahun kalender tertentu ke database (fitur 1-Klik Otomatisasi Kalender Libur).
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function holidayGenerateNational(Request $request)
+    {
+        $year = (int)$request->get('year', 2026);
+        $defaults = Holiday::getDefaultNationalHolidays($year);
+
+        $insertedCount = 0;
+        foreach ($defaults as $item) {
+            $existing = Holiday::where('tanggal', $item['tanggal'])->first();
+            if (!$existing) {
+                Holiday::create([
+                    'tanggal' => $item['tanggal'],
+                    'nama' => $item['nama'],
+                    'keterangan' => $item['keterangan'],
+                    'is_libur_nasional' => true,
+                ]);
+                $insertedCount++;
+            }
+        }
+
+        return redirect()->route('operator.holidays.index', ['year' => $year])
+            ->with('success', "Berhasil memuat {$insertedCount} Hari Libur Nasional & Cuti Bersama untuk Tahun {$year}!");
+    }
+
+    /**
+     * Menampilkan halaman profil & keamanan akun operator presensi.
+     *
+     * @return \Illuminate\View\View
+     */
+    public function profile()
+    {
+        $user = auth()->user();
+        return view('operator.profile', compact('user'));
+    }
+
+    /**
+     * Memproses perubahan Nomor Identitas (NIP) dan nama lengkap operator sendiri.
+     * Dilengkapi verifikasi keamanan kata sandi saat ini.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function updateNip(Request $request)
+    {
+        $user = auth()->user();
+
+        $validated = $request->validate([
+            'nip' => 'required|string|max:50|unique:users,nip,' . $user->id,
+            'name' => 'required|string|max:255',
+            'current_password' => 'required|string',
+        ], [
+            'nip.required' => 'Nomor Identitas (NIP) wajib diisi.',
+            'nip.unique' => 'NIP tersebut sudah digunakan oleh akun lain.',
+            'name.required' => 'Nama lengkap wajib diisi.',
+            'current_password.required' => 'Masukkan password Anda untuk konfirmasi perubahan NIP.',
+        ]);
+
+        if (!Hash::check($request->current_password, $user->password)) {
+            return back()->withErrors(['current_password' => 'Password saat ini tidak sesuai. Konfirmasi gagal.'])->withInput();
+        }
+
+        $user->update([
+            'nip' => $validated['nip'],
+            'name' => $validated['name'],
+        ]);
+
+        return back()->with('success', 'Data Profil & NIP Operator berhasil diperbarui menjadi ' . $user->nip . '!');
+    }
+
+    /**
+     * Memproses pembaruan kata sandi akun operator presensi secara mandiri.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function updatePassword(Request $request)
+    {
+        $request->validate([
+            'current_password' => 'required|string',
+            'password' => 'required|string|min:6|confirmed',
+        ], [
+            'current_password.required' => 'Password lama wajib diisi.',
+            'password.required' => 'Password baru wajib diisi.',
+            'password.min' => 'Password baru minimal 6 karakter.',
+            'password.confirmed' => 'Konfirmasi password baru tidak cocok.',
+        ]);
+
+        $user = auth()->user();
+
+        if (!Hash::check($request->current_password, $user->password)) {
+            return back()->withErrors(['current_password' => 'Password saat ini tidak sesuai.']);
+        }
+
+        $user->update([
+            'password' => Hash::make($request->password),
+        ]);
+
+        return back()->with('success', 'Password akun Operator Anda berhasil diperbarui!');
+    }
+
+    /**
+     * Memproses pengunggahan / pembaruan foto profil (PP) operator presensi.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function updateFoto(Request $request)
+    {
+        $request->validate([
+            'foto' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
+        ], [
+            'foto.required' => 'Silakan pilih berkas foto terlebih dahulu.',
+            'foto.image' => 'Berkas harus berupa gambar.',
+            'foto.mimes' => 'Format foto harus berupa JPG, PNG, atau WEBP.',
+            'foto.max' => 'Ukuran berkas foto maksimal 2MB.',
+        ]);
+
+        $user = auth()->user();
+
+        $folder = 'uploads/profiles';
+        $fullFolder = public_path($folder);
+        if (!File::exists($fullFolder)) {
+            File::makeDirectory($fullFolder, 0755, true, true);
+        }
+
+        // Hapus foto lama jika ada
+        if ($user->foto && File::exists(public_path($user->foto))) {
+            File::delete(public_path($user->foto));
+        }
+
+        $file = $request->file('foto');
+        $imgInfo = @getimagesize($file->getRealPath());
+        if ($imgInfo === false || !in_array($imgInfo[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP])) {
+            return back()->with('error', 'Berkas yang diunggah tidak valid atau bukan gambar asli.');
+        }
+
+        $ext = strtolower($file->getClientOriginalExtension() ?: 'jpg');
+        if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) {
+            $ext = 'jpg';
+        }
+        $filename = 'operator_' . $user->id . '_' . time() . '_' . uniqid() . '.' . $ext;
+        $file->move($fullFolder, $filename);
+
+        $user->update([
+            'foto' => $folder . '/' . $filename,
+        ]);
+
+        return back()->with('success', 'Foto profil Operator berhasil diperbarui!');
+    }
+
+    /**
+     * Menghapus foto profil operator.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function deleteFoto(Request $request)
+    {
+        $user = auth()->user();
+
+        if ($user->foto && File::exists(public_path($user->foto))) {
+            File::delete(public_path($user->foto));
+        }
+
+        $user->update([
+            'foto' => null,
+        ]);
+
+        return back()->with('success', 'Foto profil berhasil dihapus.');
+    }
+}

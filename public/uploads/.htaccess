@@ -1,0 +1,24 @@
+# =======================================================
+# KEAMANAN SISTEM PRESENSI: PROTEKSI DIREKTORI UPLOADS
+# Mencegah eksekusi script PHP, Web Shell, dan executable
+# =======================================================
+
+# 1. Tolak akses ke file script berbahaya apapun
+<FilesMatch "(?i)\.(php|phtml|php3|php4|php5|php7|php8|phps|exe|pl|py|cgi|sh|bash|bat|cmd|hta)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+# 2. Matikan engine PHP di seluruh subdirektori uploads
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+# 3. Nonaktifkan eksekusi skrip CGI dan Directory Indexing
+Options -ExecCGI -Indexes

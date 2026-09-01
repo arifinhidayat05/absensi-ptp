@@ -1,0 +1,10 @@
+.git
+.github
+node_modules
+vendor
+.phpunit.result.cache
+*.log
+public.zip
+Book1.xlsx
+.vscode
+.idea
