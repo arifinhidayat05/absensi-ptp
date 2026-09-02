@@ -592,6 +592,8 @@
                                     <div class="text-[8.5px] {{ $rec['masuk']->status === 'terlambat' ? 'text-amber-800 font-bold' : 'text-slate-500' }}">
                                         {{ $rec['masuk']->status === 'terlambat' ? 'Terlambat' : 'Tepat Waktu' }}
                                     </div>
+                                @elseif($rec['leave'])
+                                    <span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[8.5px] border border-emerald-300">Cuti / Izin</span>
                                 @else
                                     <span class="text-slate-400">-</span>
                                 @endif
@@ -604,6 +606,8 @@
                                     <div class="text-[8.5px] text-slate-500">
                                         {{ $rec['istirahat']->status === 'lebih_awal' ? 'Lebih Awal' : 'Tepat' }}
                                     </div>
+                                @elseif($rec['leave'])
+                                    <span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[8.5px] border border-emerald-300">Cuti / Izin</span>
                                 @else
                                     <span class="text-slate-400">-</span>
                                 @endif
@@ -616,6 +620,8 @@
                                     <div class="text-[8.5px] {{ $rec['masuk_istirahat']->status === 'terlambat' ? 'text-amber-800 font-bold' : 'text-slate-500' }}">
                                         {{ $rec['masuk_istirahat']->status === 'terlambat' ? 'Terlambat' : 'Tepat' }}
                                     </div>
+                                @elseif($rec['leave'])
+                                    <span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[8.5px] border border-emerald-300">Cuti / Izin</span>
                                 @else
                                     <span class="text-slate-400">-</span>
                                 @endif
@@ -628,6 +634,8 @@
                                     <div class="text-[8.5px] {{ $rec['pulang']->status === 'lebih_awal' ? 'text-amber-800 font-bold' : 'text-slate-500' }}">
                                         {{ $rec['pulang']->status === 'lebih_awal' ? 'Lebih Awal' : 'Tepat' }}
                                     </div>
+                                @elseif($rec['leave'])
+                                    <span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[8.5px] border border-emerald-300">Cuti / Izin</span>
                                 @else
                                     <span class="text-slate-400">-</span>
                                 @endif

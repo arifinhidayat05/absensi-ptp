@@ -787,8 +787,21 @@
             </div>
 
             <!-- Langkah 2: Upload File Form -->
-            <form action="{{ route('operator.employees.import-excel') }}" method="POST" enctype="multipart/form-data" class="space-y-4">
+            <form id="importExcelForm" onsubmit="handleImportSubmit(event)" action="{{ route('operator.employees.import-excel') }}" method="POST" enctype="multipart/form-data" class="space-y-4">
                 @csrf
+
+                <!-- Info Ketentuan Otomatis -->
+                <div class="bg-amber-50/80 border border-amber-200 rounded-2xl p-3.5 space-y-1.5 text-[11px] text-amber-950">
+                    <div class="font-bold flex items-center gap-1.5 text-amber-900">
+                        <i class="fa-solid fa-circle-info text-amber-600"></i> Ketentuan Otomatis Sistem:
+                    </div>
+                    <ul class="list-disc list-inside space-y-1 text-slate-600 pl-0.5">
+                        <li>Nama siswa/mahasiswa dan sekolah/kampus otomatis <strong>Capitalize each word</strong>.</li>
+                        <li>Jika data sudah ada di database dan <strong>semuanya sama</strong>, otomatis <strong>dilewati (skip)</strong>.</li>
+                        <li>Jika ada perbedaan data pada akun yang sudah ada, data akan diperbarui.</li>
+                    </ul>
+                </div>
+
                 <div class="space-y-2">
                     <div class="flex items-center gap-2">
                         <div class="w-8 h-8 rounded-xl bg-[#064e3b] text-white font-black text-sm flex items-center justify-center shrink-0 shadow-xs">
@@ -801,11 +814,11 @@
 
                     <input type="file" name="excel_file" id="excel_file" accept=".xlsx,.xls,.csv" required
                         class="w-full text-xs text-slate-600 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#064e3b] file:text-white hover:file:bg-[#043d2e] border border-slate-300 rounded-2xl bg-slate-50 p-2 cursor-pointer">
-                    <p class="text-[10px] text-slate-400">Maksimal 5MB. Password akun baru otomatis dibuatkan "password".</p>
+                    <p class="text-[10px] text-slate-400">Maksimal 10MB. Password akun baru otomatis dibuatkan "password".</p>
                 </div>
 
                 <div class="pt-2 flex gap-2">
-                    <button type="submit" class="flex-1 py-3 px-4 bg-[#064e3b] hover:bg-[#043d2e] text-white font-bold rounded-xl text-xs shadow-md transition border border-emerald-700 flex items-center justify-center gap-2 cursor-pointer">
+                    <button type="submit" id="btnSubmitImport" class="flex-1 py-3 px-4 bg-[#064e3b] hover:bg-[#043d2e] text-white font-bold rounded-xl text-xs shadow-md transition border border-emerald-700 flex items-center justify-center gap-2 cursor-pointer">
                         <i class="fa-solid fa-cloud-arrow-up text-amber-300"></i> PROSES IMPORT DATA
                     </button>
                     <button type="button" onclick="closeImportModal()" class="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer">
@@ -816,5 +829,70 @@
         </div>
     </div>
 </div>
+
+<script>
+    function handleImportSubmit(event) {
+        const fileInput = document.getElementById('excel_file');
+        if (!fileInput.files || fileInput.files.length === 0) {
+            return;
+        }
+        const btn = document.getElementById('btnSubmitImport');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-amber-300"></i> Memproses Import...';
+        btn.classList.add('opacity-75', 'cursor-not-allowed');
+    }
+</script>
+
+@if(session('import_result'))
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const res = @json(session('import_result'));
+        if (res) {
+            Swal.fire({
+                icon: res.status === 'success' ? 'success' : (res.status === 'info' ? 'info' : 'error'),
+                title: res.title || (res.status === 'error' ? 'Import Gagal' : 'Pemberitahuan Import'),
+                html: `
+                    <div class="text-left text-xs space-y-3 py-1">
+                        ${res.status === 'error' ? `
+                            <div class="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl flex items-start gap-2.5">
+                                <i class="fa-solid fa-circle-exclamation text-rose-600 text-base mt-0.5 shrink-0"></i>
+                                <span class="font-medium leading-relaxed">${res.message}</span>
+                            </div>
+                        ` : `
+                            <p class="text-slate-700 font-medium leading-relaxed">${res.message}</p>
+                            <div class="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                                <div class="flex justify-between items-center text-emerald-900 font-semibold">
+                                    <span class="flex items-center gap-1.5"><i class="fa-solid fa-user-plus text-emerald-600"></i> Data Baru Ditambahkan:</span>
+                                    <span class="font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md text-xs">${res.created}</span>
+                                </div>
+                                <div class="flex justify-between items-center text-amber-900 font-semibold">
+                                    <span class="flex items-center gap-1.5"><i class="fa-solid fa-user-pen text-amber-600"></i> Data Diperbarui:</span>
+                                    <span class="font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md text-xs">${res.updated}</span>
+                                </div>
+                                <div class="flex justify-between items-center text-slate-800 font-semibold">
+                                    <span class="flex items-center gap-1.5"><i class="fa-solid fa-forward-step text-slate-500"></i> Data Dilewati (Sudah Sama):</span>
+                                    <span class="font-bold bg-slate-200 text-slate-800 px-2 py-0.5 rounded-md text-xs">${res.skipped_same}</span>
+                                </div>
+                                ${res.skipped_incomplete > 0 ? `
+                                <div class="flex justify-between items-center text-rose-900 font-semibold">
+                                    <span class="flex items-center gap-1.5"><i class="fa-solid fa-triangle-exclamation text-rose-600"></i> Baris Tidak Lengkap:</span>
+                                    <span class="font-bold bg-rose-100 text-rose-800 px-2 py-0.5 rounded-md text-xs">${res.skipped_incomplete}</span>
+                                </div>
+                                ` : ''}
+                            </div>
+                            <div class="text-[11px] text-slate-500 bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-100 flex items-center gap-2">
+                                <i class="fa-solid fa-circle-check text-emerald-600 shrink-0"></i>
+                                <span>Nama siswa/mahasiswa dan sekolah/kampus otomatis diformat Capitalize each word.</span>
+                            </div>
+                        `}
+                    </div>
+                `,
+                confirmButtonColor: '#064e3b',
+                confirmButtonText: 'Selesai'
+            });
+        }
+    });
+</script>
+@endif
 
 @endsection

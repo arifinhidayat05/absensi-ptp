@@ -172,4 +172,190 @@ class EmployeeImportTest extends TestCase
             @unlink($tempPath);
         }
     }
+
+    public function test_import_capitalizes_student_and_school_names_and_skips_identical_data()
+    {
+        $operator = $this->createOperator();
+
+        // 1. Buat spreadsheet dengan nama siswa/mahasiswa dan sekolah dalam huruf kecil
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+
+        $sheet->setCellValue('A1', 'NIP/NIM/NISN');
+        $sheet->setCellValue('B1', 'NAMA');
+        $sheet->setCellValue('C1', 'KATEGORI');
+        $sheet->setCellValue('D1', 'JABATAN');
+        $sheet->setCellValue('E1', 'SEKOLAH/KAMPUS');
+        $sheet->setCellValue('F1', 'NO HP');
+        $sheet->setCellValue('G1', 'EMAIL');
+
+        // Siswa magang dengan nama dan sekolah lowercase
+        $sheet->setCellValue('A2', '0059988776');
+        $sheet->setCellValue('B2', 'budi santoso');
+        $sheet->setCellValue('C2', 'siswa_magang');
+        $sheet->setCellValue('D2', 'Siswa Magang');
+        $sheet->setCellValue('E2', 'smkn 1 pontianak');
+        $sheet->setCellValue('F2', '085211223344');
+        $sheet->setCellValue('G2', 'budi@test.com');
+
+        // Mahasiswa magang dengan nama dan kampus lowercase
+        $sheet->setCellValue('A3', 'F1081211099');
+        $sheet->setCellValue('B3', 'siti rahmawati putri');
+        $sheet->setCellValue('C3', 'mahasiswa_magang');
+        $sheet->setCellValue('D3', 'Mahasiswa Magang');
+        $sheet->setCellValue('E3', 'universitas tanjungpura');
+        $sheet->setCellValue('F3', '089612345678');
+        $sheet->setCellValue('G3', 'siti@test.com');
+
+        $tempPath = tempnam(sys_get_temp_dir(), 'test_excel_cap_') . '.xlsx';
+        (new Xlsx($spreadsheet))->save($tempPath);
+
+        $uploadedFile = new UploadedFile(
+            $tempPath,
+            'import_magang.xlsx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            null,
+            true
+        );
+
+        // Import pertama: Data baru dibuat dan nama dikapitalisasi
+        $response1 = $this->actingAs($operator)->post('/operator/employees/import-excel', [
+            'excel_file' => $uploadedFile,
+        ]);
+
+        $response1->assertRedirect('/operator/employees');
+        $response1->assertSessionHas('success');
+
+        // Verifikasi nama dan sekolah/kampus otomatis Capitalize Each Word
+        $this->assertDatabaseHas('users', [
+            'nip' => '0059988776',
+            'name' => 'Budi Santoso', // Capitalized!
+            'asal_instansi' => 'SMKN 1 Pontianak', // Capitalized with SMKN acronym preserved!
+            'tipe_identitas' => 'nisn',
+            'jenis_pegawai' => 'siswa_magang',
+        ]);
+
+        $this->assertDatabaseHas('users', [
+            'nip' => 'F1081211099',
+            'name' => 'Siti Rahmawati Putri', // Capitalized!
+            'asal_instansi' => 'Universitas Tanjungpura', // Capitalized!
+            'tipe_identitas' => 'nim',
+            'jenis_pegawai' => 'mahasiswa_magang',
+        ]);
+
+        // 2. Import kedua dengan file yang SAMA PERSIS:
+        // Harus dilewati (skip) dan tidak membuat duplikat atau update yang tidak perlu
+        $uploadedFile2 = new UploadedFile(
+            $tempPath,
+            'import_magang.xlsx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            null,
+            true
+        );
+
+        $response2 = $this->actingAs($operator)->post('/operator/employees/import-excel', [
+            'excel_file' => $uploadedFile2,
+        ]);
+
+        $response2->assertRedirect('/operator/employees');
+        $response2->assertSessionHas('info');
+        $importResult = session('import_result');
+        $this->assertEquals(0, $importResult['created']);
+        $this->assertEquals(0, $importResult['updated']);
+        $this->assertEquals(2, $importResult['skipped_same']); // Kedua data di-skip!
+
+        // Jumlah user di database tidak bertambah
+        $this->assertEquals(1, User::where('nip', '0059988776')->count());
+        $this->assertEquals(1, User::where('nip', 'F1081211099')->count());
+
+        if (file_exists($tempPath)) {
+            @unlink($tempPath);
+        }
+    }
+
+    public function test_import_updates_when_data_is_different()
+    {
+        $operator = $this->createOperator();
+
+        // Buat user awal di DB
+        User::create([
+            'nip' => '0051122334',
+            'name' => 'Rizky Febrian',
+            'tipe_identitas' => 'nisn',
+            'jenis_pegawai' => 'siswa_magang',
+            'jabatan' => 'Siswa Magang',
+            'asal_instansi' => 'SMKN 2 Pontianak',
+            'no_hp' => '081200000000',
+            'role' => 'karyawan',
+            'password' => Hash::make('password'),
+        ]);
+
+        // Buat Excel dengan no_hp dan jabatan yang diperbarui
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setCellValue('A1', 'NIP');
+        $sheet->setCellValue('B1', 'NAMA');
+        $sheet->setCellValue('C1', 'KATEGORI');
+        $sheet->setCellValue('D1', 'JABATAN');
+        $sheet->setCellValue('E1', 'ASAL');
+        $sheet->setCellValue('F1', 'NO HP');
+        $sheet->setCellValue('G1', 'EMAIL');
+
+        $sheet->setCellValue('A2', '0051122334');
+        $sheet->setCellValue('B2', 'Rizky Febrian');
+        $sheet->setCellValue('C2', 'siswa_magang');
+        $sheet->setCellValue('D2', 'Teknisi Jaringan Magang'); // Berubah
+        $sheet->setCellValue('E2', 'SMKN 2 Pontianak');
+        $sheet->setCellValue('F2', '081299998888'); // Berubah
+        $sheet->setCellValue('G2', '');
+
+        $tempPath = tempnam(sys_get_temp_dir(), 'test_excel_diff_') . '.xlsx';
+        (new Xlsx($spreadsheet))->save($tempPath);
+
+        $uploadedFile = new UploadedFile(
+            $tempPath,
+            'import_diff.xlsx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            null,
+            true
+        );
+
+        $response = $this->actingAs($operator)->post('/operator/employees/import-excel', [
+            'excel_file' => $uploadedFile,
+        ]);
+
+        $response->assertRedirect('/operator/employees');
+        $response->assertSessionHas('success');
+
+        $importResult = session('import_result');
+        $this->assertEquals(0, $importResult['created']);
+        $this->assertEquals(1, $importResult['updated']); // 1 data updated
+        $this->assertEquals(0, $importResult['skipped_same']);
+
+        $this->assertDatabaseHas('users', [
+            'nip' => '0051122334',
+            'jabatan' => 'Teknisi Jaringan Magang',
+            'no_hp' => '081299998888',
+        ]);
+
+        if (file_exists($tempPath)) {
+            @unlink($tempPath);
+        }
+    }
+
+    public function test_import_fails_with_invalid_file_and_gives_error_notification()
+    {
+        $operator = $this->createOperator();
+
+        $invalidFile = UploadedFile::fake()->create('dokumen.pdf', 100, 'application/pdf');
+
+        $response = $this->actingAs($operator)->post('/operator/employees/import-excel', [
+            'excel_file' => $invalidFile,
+        ]);
+
+        $response->assertRedirect('/operator/employees');
+        $response->assertSessionHas('error');
+        $importResult = session('import_result');
+        $this->assertEquals('error', $importResult['status']);
+    }
 }

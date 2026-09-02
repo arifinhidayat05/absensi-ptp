@@ -305,11 +305,45 @@
                 </div>
             @endif
 
+            @if(session('info'))
+                <div class="mb-5 p-4 rounded-2xl bg-sky-50 border border-sky-200 text-sky-900 flex items-center justify-between shadow-sm" role="alert">
+                    <div class="flex items-center space-x-3">
+                        <i class="fa-solid fa-circle-info text-sky-600 text-xl"></i>
+                        <span class="font-bold text-xs sm:text-sm">{{ session('info') }}</span>
+                    </div>
+                    <button onclick="this.parentElement.remove()" class="text-sky-600 hover:text-sky-900"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            @endif
+
+            @if(session('warning'))
+                <div class="mb-5 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between shadow-sm" role="alert">
+                    <div class="flex items-center space-x-3">
+                        <i class="fa-solid fa-triangle-exclamation text-amber-600 text-xl"></i>
+                        <span class="font-bold text-xs sm:text-sm">{{ session('warning') }}</span>
+                    </div>
+                    <button onclick="this.parentElement.remove()" class="text-amber-600 hover:text-amber-900"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            @endif
+
             @if(session('error'))
                 <div class="mb-5 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 flex items-center justify-between shadow-sm" role="alert">
                     <div class="flex items-center space-x-3">
                         <i class="fa-solid fa-circle-exclamation text-rose-600 text-xl"></i>
                         <span class="font-bold text-xs sm:text-sm">{{ session('error') }}</span>
+                    </div>
+                    <button onclick="this.parentElement.remove()" class="text-rose-600 hover:text-rose-900"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            @endif
+
+            @if($errors->any())
+                <div class="mb-5 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 flex items-center justify-between shadow-sm" role="alert">
+                    <div class="flex items-center space-x-3">
+                        <i class="fa-solid fa-circle-exclamation text-rose-600 text-xl"></i>
+                        <div class="text-xs sm:text-sm font-bold">
+                            @foreach($errors->all() as $error)
+                                <div>{{ $error }}</div>
+                            @endforeach
+                        </div>
                     </div>
                     <button onclick="this.parentElement.remove()" class="text-rose-600 hover:text-rose-900"><i class="fa-solid fa-xmark"></i></button>
                 </div>

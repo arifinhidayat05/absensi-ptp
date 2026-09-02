@@ -58,19 +58,19 @@
     </div>
 
     @php
-        // Detect current active open session for Hero Spotlight
+        // Detect current active open session for Hero Spotlight (exclude if already on approved leave)
         $activeSessionKey = null;
         foreach(['masuk', 'istirahat', 'masuk_istirahat', 'pulang'] as $t) {
-            if ($cards[$t]['window']['is_open'] && !$cards[$t]['has_attended']) {
+            if ($cards[$t]['window']['is_open'] && !$cards[$t]['has_attended'] && !($cards[$t]['is_on_leave'] ?? false)) {
                 $activeSessionKey = $t;
                 break;
             }
         }
 
-        // Count attended today
+        // Count attended & approved leave sessions today
         $totalAttendedToday = 0;
         foreach(['masuk', 'istirahat', 'masuk_istirahat', 'pulang'] as $t) {
-            if ($cards[$t]['has_attended']) $totalAttendedToday++;
+            if ($cards[$t]['has_attended'] || ($cards[$t]['is_on_leave'] ?? false)) $totalAttendedToday++;
         }
     @endphp
 
@@ -174,6 +174,10 @@
                                 <span class="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold flex items-center gap-1 border border-emerald-300">
                                     <i class="fa-solid fa-circle-check"></i> Tercatat
                                 </span>
+                            @elseif($item['is_on_leave'] ?? false)
+                                <span class="px-2.5 py-1 rounded-full bg-sky-100 text-sky-800 text-[11px] font-bold flex items-center gap-1 border border-sky-300 shadow-xs">
+                                    <i class="fa-solid fa-calendar-check text-sky-600"></i> Cuti / Izin
+                                </span>
                             @elseif($isRejected)
                                 <span class="px-2.5 py-1 rounded-full bg-rose-600 text-white text-[11px] font-bold flex items-center gap-1 shadow-sm">
                                     <i class="fa-solid fa-circle-xmark"></i> Ditolak (ALFA)
@@ -227,6 +231,21 @@
                                 <i class="fa-solid fa-image me-1"></i> Lihat Foto &amp; Peta GPS
                             </button>
                         </div>
+                    @elseif($item['is_on_leave'] ?? false)
+                        <div class="bg-sky-50 border border-sky-200 rounded-xl p-2.5 mb-3 space-y-1 text-xs text-sky-900">
+                            <div class="flex items-center justify-between font-bold">
+                                <span><i class="fa-solid fa-calendar-check me-1 text-sky-700"></i> {{ \App\Models\Leave::getJenisCutiLabel($item['leave']->jenis_cuti) }}</span>
+                                <span class="uppercase tracking-wider px-1.5 py-0.5 rounded text-[9px] bg-sky-700 text-white font-bold">
+                                    Disetujui
+                                </span>
+                            </div>
+                            <div class="text-[10px] text-slate-600 truncate" title="{{ $item['leave']->alasan }}">
+                                <span class="font-semibold text-slate-700">Alasan:</span> {{ $item['leave']->alasan }}
+                            </div>
+                            <div class="text-[10px] text-sky-800 font-semibold italic mt-0.5">
+                                Bebas presensi karena telah disetujui izin/cuti resmi.
+                            </div>
+                        </div>
                     @elseif($isRejected)
                         <div class="bg-rose-50 border border-rose-200 rounded-xl p-2.5 mb-3 space-y-1 text-xs text-rose-900">
                             <div class="flex items-center justify-between font-bold">
@@ -246,6 +265,10 @@
                         <button disabled class="w-full py-2.5 px-3 bg-slate-100 text-slate-400 font-bold rounded-xl text-xs cursor-not-allowed border border-slate-200 flex items-center justify-center gap-1">
                             <i class="fa-solid fa-check text-emerald-600"></i> Sudah Presensi
                         </button>
+                    @elseif($item['is_on_leave'] ?? false)
+                        <div class="w-full py-2.5 px-3 bg-sky-50 text-sky-800 font-bold rounded-xl text-xs text-center border border-sky-300 flex items-center justify-center gap-1.5 shadow-xs">
+                            <i class="fa-solid fa-circle-check text-sky-600"></i> Selesai (Izin Cuti)
+                        </div>
                     @elseif($isRejected && $isOpen)
                         <button onclick="openCameraModal('{{ $tipe }}', '{{ $item['label'] }}')"
                             class="w-full py-3 px-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-md transition duration-200 flex items-center justify-center gap-1.5 animate-pulse">

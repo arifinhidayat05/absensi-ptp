@@ -12,6 +12,7 @@ use App\Models\Holiday;
 use App\Services\AttendanceExportService;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
@@ -246,6 +247,15 @@ class OperatorController extends Controller
             }
         }
 
+        // Format nama dan asal instansi/sekolah (Capitalize each word)
+        $validated['name'] = self::formatPersonName($validated['name'], $validated['jenis_pegawai']);
+        if (!empty($validated['asal_instansi'])) {
+            $validated['asal_instansi'] = self::formatSchoolName($validated['asal_instansi']);
+        }
+        if (!empty($validated['no_hp'])) {
+            $validated['no_hp'] = self::cleanPhoneNumber($validated['no_hp']);
+        }
+
         $validated['role'] = 'karyawan';
         $validated['password'] = Hash::make('password'); // Kata sandi bawaan awal: password
 
@@ -331,6 +341,15 @@ class OperatorController extends Controller
             $filename = 'profile_' . $employee->id . '_' . time() . '_' . uniqid() . '.' . $ext;
             $file->move($fullFolder, $filename);
             $validated['foto'] = $folder . '/' . $filename;
+        }
+
+        // Format nama dan asal instansi/sekolah (Capitalize each word)
+        $validated['name'] = self::formatPersonName($validated['name'], $validated['jenis_pegawai']);
+        if (!empty($validated['asal_instansi'])) {
+            $validated['asal_instansi'] = self::formatSchoolName($validated['asal_instansi']);
+        }
+        if (!empty($validated['no_hp'])) {
+            $validated['no_hp'] = self::cleanPhoneNumber($validated['no_hp']);
         }
 
         $employee->update($validated);
@@ -527,8 +546,9 @@ class OperatorController extends Controller
             '2. Kolom KATEGORI STATUS wajib memilih salah satu nilai: "pegawai", "mahasiswa_magang", atau "siswa_magang".',
             '3. NIP/NIM/NISN akan otomatis menjadi Username saat login presensi.',
             '4. Kata sandi (password) akun baru otomatis disetel ke nilai default: "password"',
-            '5. Jika NIP/NIM/NISN sudah ada di database, sistem akan memperbarui data pegawai yang bersangkutan.',
-            '6. Baris 2 sampai 4 di atas adalah baris CONTOH, Anda dapat menimpanya dengan data asli.',
+            '5. Jika data NIP/NIM/NISN sudah ada di database dan semua datanya sama persis, data otomatis dilewati (skip).',
+            '6. Nama siswa/mahasiswa dan sekolah/kampus otomatis diformat huruf kapital tiap kata (Capitalize each word).',
+            '7. Baris 2 sampai 4 di atas adalah baris CONTOH, Anda dapat menimpanya dengan data asli.',
         ];
 
         $currNoteRow = $noteRow + 1;
@@ -564,6 +584,169 @@ class OperatorController extends Controller
     }
 
     /**
+     * Memformat nama orang (siswa/mahasiswa/pegawai).
+     * Untuk siswa dan mahasiswa magang, otomatis diformat Title Case (Capitalize each word).
+     * Untuk pegawai, jika ditulis huruf kecil semua atau kapital semua, diformat Capitalize each word.
+     * Gelar pada pegawai (misal: "Ahmad Pratama, S.H.") tetap dipertahankan jika sudah bervariasi huruf besar-kecil.
+     *
+     * @param string $name
+     * @param string $jenisPegawai
+     * @return string
+     */
+    public static function formatPersonName(string $name, string $jenisPegawai = 'pegawai'): string
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return '';
+        }
+
+        // Hapus spasi berlebih
+        $name = preg_replace('/\s+/u', ' ', $name);
+
+        if (in_array($jenisPegawai, ['mahasiswa_magang', 'siswa_magang'])) {
+            return Str::title(mb_strtolower($name, 'UTF-8'));
+        }
+
+        // Untuk pegawai: jika all uppercase atau all lowercase, ubah ke Title Case
+        if (mb_strtoupper($name, 'UTF-8') === $name || mb_strtolower($name, 'UTF-8') === $name) {
+            return Str::title(mb_strtolower($name, 'UTF-8'));
+        }
+
+        return $name;
+    }
+
+    /**
+     * Memformat nama sekolah, kampus, atau universitas ke format Capitalize each word (Title Case)
+     * dengan tetap menjaga singkatan/akronim institusi pendidikan umum di Indonesia dalam huruf kapital.
+     *
+     * @param string|null $school
+     * @return string|null
+     */
+    public static function formatSchoolName(?string $school): ?string
+    {
+        if (empty($school)) {
+            return null;
+        }
+
+        $school = trim($school);
+        if ($school === '' || $school === '-') {
+            return null;
+        }
+
+        // Hapus spasi berlebih
+        $school = preg_replace('/\s+/u', ' ', $school);
+
+        // Ubah ke Title Case
+        $formatted = Str::title(mb_strtolower($school, 'UTF-8'));
+
+        // Daftar akronim institusi pendidikan umum yang tetap huruf kapital
+        $acronyms = [
+            'Smkn' => 'SMKN',
+            'Smk' => 'SMK',
+            'Sman' => 'SMAN',
+            'Sma' => 'SMA',
+            'Smpn' => 'SMPN',
+            'Smp' => 'SMP',
+            'Man' => 'MAN',
+            'Mtsn' => 'MTSN',
+            'Mts' => 'MTS',
+            'Sdn' => 'SDN',
+            'Sd' => 'SD',
+            'Untan' => 'UNTAN',
+            'Polnep' => 'POLNEP',
+            'Iain' => 'IAIN',
+            'Stmik' => 'STMIK',
+            'Umsi' => 'UMSI',
+            'Upb' => 'UPB',
+            'Ugm' => 'UGM',
+            'Itb' => 'ITB',
+            'Ui' => 'UI',
+            'Upi' => 'UPI',
+            'Ptk' => 'PTK',
+            'D3' => 'D3',
+            'D4' => 'D4',
+            'S1' => 'S1',
+            'S2' => 'S2',
+            'S3' => 'S3',
+            'Pkl' => 'PKL',
+        ];
+
+        foreach ($acronyms as $pattern => $replacement) {
+            $formatted = preg_replace('/\b' . $pattern . '\b/u', $replacement, $formatted);
+        }
+
+        return $formatted;
+    }
+
+    /**
+     * Membersihkan dan menstandarisasi nomor telepon/WhatsApp Indonesia.
+     *
+     * @param string|null $phone
+     * @return string|null
+     */
+    public static function cleanPhoneNumber(?string $phone): ?string
+    {
+        if (empty($phone)) {
+            return null;
+        }
+
+        $phone = trim($phone);
+        $clean = preg_replace('/[^0-9]/', '', $phone);
+
+        if (empty($clean)) {
+            return null;
+        }
+
+        // Jika diawali 628..., ubah menjadi 08...
+        if (str_starts_with($clean, '628')) {
+            $clean = '0' . substr($clean, 2);
+        } elseif (str_starts_with($clean, '8')) {
+            // Jika Excel memotong angka 0 di depan (cth: 81234567890), tambahkan 0
+            $clean = '0' . $clean;
+        }
+
+        return $clean;
+    }
+
+    /**
+     * Mengambil nilai sel Excel secara aman tanpa terkena format notasi ilmiah (scientific notation)
+     * atau formula yang belum terevaluasi.
+     *
+     * @param mixed $cell
+     * @return string
+     */
+    public static function getSafeCellValue($cell): string
+    {
+        if (!$cell) {
+            return '';
+        }
+
+        try {
+            $val = $cell->getValue();
+            // Jika formula, ambil hasil kalkulasinya
+            if (is_string($val) && str_starts_with($val, '=')) {
+                try {
+                    $val = $cell->getCalculatedValue();
+                } catch (\Throwable $e) {
+                    // fallback ke nilai mentah
+                }
+            }
+
+            // Jika berupa float atau angka besar seperti NIP 18 digit (1.98507E+17)
+            if (is_numeric($val)) {
+                $valStr = (string) $val;
+                if (stripos($valStr, 'e') !== false || is_float($val)) {
+                    $val = number_format((float) $val, 0, '', '');
+                }
+            }
+
+            return trim((string) $val);
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
+
+    /**
      * Memproses import data pegawai / peserta magang secara massal dari berkas Excel (.xlsx, .xls, .csv).
      *
      * @param Request $request
@@ -571,60 +754,127 @@ class OperatorController extends Controller
      */
     public function employeeImportExcel(Request $request)
     {
-        $request->validate([
-            'excel_file' => 'required|file|mimes:xlsx,xls,csv|max:5120',
+        $validator = Validator::make($request->all(), [
+            'excel_file' => 'required|file|max:10240',
         ], [
             'excel_file.required' => 'Silakan pilih berkas Excel yang akan diunggah.',
-            'excel_file.mimes' => 'Format berkas harus berupa Excel (.xlsx, .xls) atau CSV (.csv).',
-            'excel_file.max' => 'Ukuran berkas Excel maksimal 5MB.',
+            'excel_file.file' => 'Berkas yang diunggah harus berupa file yang valid.',
+            'excel_file.max' => 'Ukuran berkas Excel maksimal 10MB.',
         ]);
 
+        if ($validator->fails()) {
+            $errorMsg = $validator->errors()->first();
+            return redirect()->route('operator.employees.index')
+                ->with('error', $errorMsg)
+                ->with('import_result', [
+                    'status' => 'error',
+                    'title' => 'Import Gagal',
+                    'message' => $errorMsg,
+                    'created' => 0,
+                    'updated' => 0,
+                    'skipped_same' => 0,
+                    'skipped_incomplete' => 0,
+                ]);
+        }
+
         $file = $request->file('excel_file');
+        $extension = strtolower($file->getClientOriginalExtension());
+        if (!in_array($extension, ['xlsx', 'xls', 'csv'])) {
+            $errorMsg = 'Format berkas tidak didukung. Harap unggah berkas Excel (.xlsx, .xls) atau CSV (.csv).';
+            return redirect()->route('operator.employees.index')
+                ->with('error', $errorMsg)
+                ->with('import_result', [
+                    'status' => 'error',
+                    'title' => 'Format Berkas Tidak Sesuai',
+                    'message' => $errorMsg,
+                    'created' => 0,
+                    'updated' => 0,
+                    'skipped_same' => 0,
+                    'skipped_incomplete' => 0,
+                ]);
+        }
 
         try {
             $spreadsheet = IOFactory::load($file->getRealPath());
             $sheet = $spreadsheet->getActiveSheet();
             $highestRow = $sheet->getHighestRow();
 
+            if ($highestRow < 2) {
+                $errorMsg = 'Berkas Excel kosong atau tidak memiliki baris data.';
+                return redirect()->route('operator.employees.index')
+                    ->with('error', $errorMsg)
+                    ->with('import_result', [
+                        'status' => 'error',
+                        'title' => 'Berkas Kosong',
+                        'message' => $errorMsg,
+                        'created' => 0,
+                        'updated' => 0,
+                        'skipped_same' => 0,
+                        'skipped_incomplete' => 0,
+                    ]);
+            }
+
             $createdCount = 0;
             $updatedCount = 0;
-            $skippedCount = 0;
+            $skippedIdenticalCount = 0;
+            $skippedIncompleteCount = 0;
 
             for ($row = 2; $row <= $highestRow; $row++) {
-                $nip = trim((string) $sheet->getCell("A{$row}")->getValue());
-                $name = trim((string) $sheet->getCell("B{$row}")->getValue());
-                $kategoriRaw = strtolower(trim((string) $sheet->getCell("C{$row}")->getValue()));
-                $jabatan = trim((string) $sheet->getCell("D{$row}")->getValue());
-                $asalInstansi = trim((string) $sheet->getCell("E{$row}")->getValue());
-                $noHp = trim((string) $sheet->getCell("F{$row}")->getValue());
-                $email = trim((string) $sheet->getCell("G{$row}")->getValue());
+                $nip = self::getSafeCellValue($sheet->getCell("A{$row}"));
+                $name = self::getSafeCellValue($sheet->getCell("B{$row}"));
+                $kategoriRaw = strtolower(self::getSafeCellValue($sheet->getCell("C{$row}")));
+                $jabatan = self::getSafeCellValue($sheet->getCell("D{$row}"));
+                $asalInstansi = self::getSafeCellValue($sheet->getCell("E{$row}"));
+                $noHp = self::getSafeCellValue($sheet->getCell("F{$row}"));
+                $email = self::getSafeCellValue($sheet->getCell("G{$row}"));
 
-                // Jika baris berisi judul petunjuk atau kosong total, lewati/selesai
-                if (empty($nip) && empty($name)) {
+                // Jika baris kosong total, lewati
+                if (empty($nip) && empty($name) && empty($kategoriRaw) && empty($jabatan) && empty($asalInstansi)) {
                     continue;
                 }
 
-                if (str_starts_with(strtoupper($nip), 'PETUNJUK') || str_starts_with(strtoupper($nip), 'CATATAN')) {
-                    break;
+                // Jika baris berisi judul petunjuk atau catatan template
+                $nipUpper = strtoupper($nip);
+                if (str_starts_with($nipUpper, 'PETUNJUK') ||
+                    str_starts_with($nipUpper, 'CATATAN') ||
+                    $nipUpper === 'NIP' ||
+                    $nipUpper === 'NOMOR IDENTITAS' ||
+                    $nipUpper === 'NO') {
+                    continue;
                 }
 
+                // Baris tanpa NIP atau Nama dilewati karena data tidak lengkap
                 if (empty($nip) || empty($name)) {
-                    $skippedCount++;
+                    $skippedIncompleteCount++;
                     continue;
                 }
 
-                // Tentukan tipe_identitas dan jenis_pegawai
-                if (str_contains($kategoriRaw, 'mahasiswa') || str_contains($kategoriRaw, 'kuliah') || str_contains($kategoriRaw, 'nim')) {
+                // Tentukan jenis pegawai dan tipe identitas
+                if (str_contains($kategoriRaw, 'mahasiswa') || str_contains($kategoriRaw, 'kuliah') || str_contains($kategoriRaw, 'nim') || str_contains($kategoriRaw, 'universitas') || str_contains($kategoriRaw, 'politeknik') || str_contains($kategoriRaw, 'kampus')) {
                     $jenisPegawai = 'mahasiswa_magang';
                     $tipeIdentitas = 'nim';
-                } elseif (str_contains($kategoriRaw, 'siswa') || str_contains($kategoriRaw, 'smk') || str_contains($kategoriRaw, 'sma') || str_contains($kategoriRaw, 'nisn')) {
+                } elseif (str_contains($kategoriRaw, 'siswa') || str_contains($kategoriRaw, 'smk') || str_contains($kategoriRaw, 'sma') || str_contains($kategoriRaw, 'nisn') || str_contains($kategoriRaw, 'sekolah') || str_contains($kategoriRaw, 'prakerin') || str_contains($kategoriRaw, 'pkl')) {
                     $jenisPegawai = 'siswa_magang';
                     $tipeIdentitas = 'nisn';
                 } else {
-                    $jenisPegawai = 'pegawai';
-                    $tipeIdentitas = 'nip';
+                    $asalLower = strtolower($asalInstansi);
+                    $jabatanLower = strtolower($jabatan);
+                    if (str_contains($asalLower, 'smk') || str_contains($asalLower, 'sma') || str_contains($jabatanLower, 'siswa')) {
+                        $jenisPegawai = 'siswa_magang';
+                        $tipeIdentitas = 'nisn';
+                    } elseif (str_contains($asalLower, 'universitas') || str_contains($asalLower, 'institut') || str_contains($asalLower, 'politeknik') || str_contains($jabatanLower, 'mahasiswa')) {
+                        $jenisPegawai = 'mahasiswa_magang';
+                        $tipeIdentitas = 'nim';
+                    } else {
+                        $jenisPegawai = 'pegawai';
+                        $tipeIdentitas = 'nip';
+                    }
                 }
 
+                // 1. Kapitalisasi Nama Siswa / Mahasiswa otomatis Capitalize each word
+                $formattedName = self::formatPersonName($name, $jenisPegawai);
+
+                // 2. Default Jabatan jika kosong
                 if (empty($jabatan)) {
                     if ($jenisPegawai === 'mahasiswa_magang') {
                         $jabatan = 'Mahasiswa Magang';
@@ -635,8 +885,14 @@ class OperatorController extends Controller
                     }
                 }
 
-                // Periksa email agar tidak duplikat jika diisi
-                $emailToSave = !empty($email) ? $email : null;
+                // 3. Kapitalisasi Asal Sekolah / Kampus otomatis Capitalize each word
+                $formattedAsalInstansi = !empty($asalInstansi) ? self::formatSchoolName($asalInstansi) : null;
+
+                // 4. Standarisasi Nomor Handphone
+                $cleanNoHp = !empty($noHp) ? self::cleanPhoneNumber($noHp) : null;
+
+                // 5. Periksa dan validasi email agar tidak bentrok
+                $emailToSave = !empty($email) ? strtolower(trim($email)) : null;
                 if ($emailToSave) {
                     $existingEmailUser = User::where('email', $emailToSave)->where('nip', '!=', $nip)->first();
                     if ($existingEmailUser) {
@@ -644,37 +900,63 @@ class OperatorController extends Controller
                     }
                 }
 
+                // 6. Cek keberadaan akun berdasarkan NIP / NIM / NISN
                 $user = User::where('nip', $nip)->first();
 
                 if ($user) {
-                    // Update data pegawai yang sudah ada
-                    $updateData = [
-                        'name' => $name,
-                        'tipe_identitas' => $tipeIdentitas,
-                        'jenis_pegawai' => $jenisPegawai,
-                        'jabatan' => $jabatan,
-                    ];
-                    if (!empty($asalInstansi)) {
-                        $updateData['asal_instansi'] = $asalInstansi;
+                    // Periksa apakah semua data di database sudah ada dan sama persis
+                    $dbInstansi = !empty($user->asal_instansi) ? trim($user->asal_instansi) : null;
+                    $excelInstansi = !empty($formattedAsalInstansi) ? trim($formattedAsalInstansi) : null;
+
+                    $dbNoHp = !empty($user->no_hp) ? self::cleanPhoneNumber($user->no_hp) : null;
+                    $excelNoHp = !empty($cleanNoHp) ? $cleanNoHp : null;
+
+                    $dbEmail = !empty($user->email) ? strtolower(trim($user->email)) : null;
+                    $excelEmail = $emailToSave;
+
+                    $updateData = [];
+
+                    if ($user->name !== $formattedName) {
+                        $updateData['name'] = $formattedName;
                     }
-                    if (!empty($noHp)) {
-                        $updateData['no_hp'] = $noHp;
+                    if ($user->tipe_identitas !== $tipeIdentitas) {
+                        $updateData['tipe_identitas'] = $tipeIdentitas;
                     }
-                    if ($emailToSave) {
-                        $updateData['email'] = $emailToSave;
+                    if ($user->jenis_pegawai !== $jenisPegawai) {
+                        $updateData['jenis_pegawai'] = $jenisPegawai;
                     }
+                    if ($user->jabatan !== $jabatan) {
+                        $updateData['jabatan'] = $jabatan;
+                    }
+                    if ($excelInstansi !== null && $excelInstansi !== $dbInstansi) {
+                        $updateData['asal_instansi'] = $excelInstansi;
+                    }
+                    if ($excelNoHp !== null && $excelNoHp !== $dbNoHp) {
+                        $updateData['no_hp'] = $excelNoHp;
+                    }
+                    if ($excelEmail !== null && $excelEmail !== $dbEmail) {
+                        $updateData['email'] = $excelEmail;
+                    }
+
+                    // Jika SEMUA data di database sudah ada dan sama persis -> SKIP SAJA
+                    if (empty($updateData)) {
+                        $skippedIdenticalCount++;
+                        continue;
+                    }
+
+                    // Jika terdapat perbedaan data -> UPDATE data pegawai
                     $user->update($updateData);
                     $updatedCount++;
                 } else {
-                    // Buat akun pegawai baru
+                    // Buat akun baru jika belum terdaftar di database
                     User::create([
                         'nip' => $nip,
                         'tipe_identitas' => $tipeIdentitas,
                         'jenis_pegawai' => $jenisPegawai,
-                        'name' => $name,
+                        'name' => $formattedName,
                         'jabatan' => $jabatan,
-                        'asal_instansi' => !empty($asalInstansi) ? $asalInstansi : null,
-                        'no_hp' => !empty($noHp) ? $noHp : null,
+                        'asal_instansi' => $formattedAsalInstansi,
+                        'no_hp' => $cleanNoHp,
                         'email' => $emailToSave,
                         'role' => 'karyawan',
                         'password' => Hash::make('password'),
@@ -683,15 +965,77 @@ class OperatorController extends Controller
                 }
             }
 
-            $msg = "Import data pegawai berhasil! ({$createdCount} data baru ditambahkan, {$updatedCount} data diperbarui)";
-            if ($skippedCount > 0) {
-                $msg .= ". {$skippedCount} baris tidak lengkap dilewati.";
+            $totalProcessed = $createdCount + $updatedCount + $skippedIdenticalCount;
+
+            if ($totalProcessed === 0) {
+                if ($skippedIncompleteCount > 0) {
+                    $errMsg = "Tidak ada data yang berhasil diimpor. {$skippedIncompleteCount} baris dilewati karena NIP atau Nama kosong.";
+                } else {
+                    $errMsg = "Berkas Excel tidak memiliki data pegawai yang dapat diproses.";
+                }
+                return redirect()->route('operator.employees.index')
+                    ->with('error', $errMsg)
+                    ->with('import_result', [
+                        'status' => 'error',
+                        'title' => 'Import Gagal',
+                        'message' => $errMsg,
+                        'created' => 0,
+                        'updated' => 0,
+                        'skipped_same' => 0,
+                        'skipped_incomplete' => $skippedIncompleteCount,
+                    ]);
             }
 
-            return redirect()->route('operator.employees.index')->with('success', $msg);
-        } catch (\Exception $e) {
+            // Susun teks ringkasan hasil import
+            $parts = [];
+            if ($createdCount > 0) {
+                $parts[] = "{$createdCount} data baru ditambahkan";
+            }
+            if ($updatedCount > 0) {
+                $parts[] = "{$updatedCount} data diperbarui";
+            }
+            if ($skippedIdenticalCount > 0) {
+                $parts[] = "{$skippedIdenticalCount} data dilewati (sudah ada & sama)";
+            }
+
+            $summaryText = implode(', ', $parts);
+            if ($skippedIncompleteCount > 0) {
+                $summaryText .= ". ({$skippedIncompleteCount} baris tidak lengkap dilewati)";
+            }
+
+            if ($createdCount === 0 && $updatedCount === 0 && $skippedIdenticalCount > 0) {
+                $statusType = 'info';
+                $titleText = 'Data Sudah Terdaftar';
+                $flashMessage = "Semua data ({$skippedIdenticalCount} data) sudah ada di database dan sama persis, sehingga dilewati (skip).";
+            } else {
+                $statusType = 'success';
+                $titleText = 'Import Berhasil';
+                $flashMessage = "Import data pegawai berhasil! " . $summaryText;
+            }
+
             return redirect()->route('operator.employees.index')
-                ->with('error', 'Gagal memproses berkas Excel: ' . $e->getMessage());
+                ->with($statusType, $flashMessage)
+                ->with('import_result', [
+                    'status' => $statusType,
+                    'title' => $titleText,
+                    'message' => $flashMessage,
+                    'created' => $createdCount,
+                    'updated' => $updatedCount,
+                    'skipped_same' => $skippedIdenticalCount,
+                    'skipped_incomplete' => $skippedIncompleteCount,
+                ]);
+        } catch (\Throwable $e) {
+            return redirect()->route('operator.employees.index')
+                ->with('error', 'Gagal memproses berkas Excel: ' . $e->getMessage())
+                ->with('import_result', [
+                    'status' => 'error',
+                    'title' => 'Gagal Memproses Berkas',
+                    'message' => 'Terjadi kesalahan saat memproses berkas Excel: ' . $e->getMessage(),
+                    'created' => 0,
+                    'updated' => 0,
+                    'skipped_same' => 0,
+                    'skipped_incomplete' => 0,
+                ]);
         }
     }
 
@@ -864,13 +1208,15 @@ class OperatorController extends Controller
                 $approvedAttendances = $allDayAttendances->where('approval_status', 'diterima');
                 $rejectedAttendances = $allDayAttendances->where('approval_status', 'ditolak');
 
+                if ($approvedLeave) {
+                    if ($approvedLeave->jenis_cuti === 'cuti_tahunan') $countCutiTahunan++;
+                    elseif ($approvedLeave->jenis_cuti === 'cuti_sakit') $countCutiSakit++;
+                    elseif ($approvedLeave->jenis_cuti === 'cuti_luar_negeri') $countCutiLN++;
+                    else $countCutiLainnya++;
+                }
+
                 if ($allDayAttendances->isEmpty()) {
-                    if ($approvedLeave) {
-                        if ($approvedLeave->jenis_cuti === 'cuti_tahunan') $countCutiTahunan++;
-                        elseif ($approvedLeave->jenis_cuti === 'cuti_sakit') $countCutiSakit++;
-                        elseif ($approvedLeave->jenis_cuti === 'cuti_luar_negeri') $countCutiLN++;
-                        else $countCutiLainnya++;
-                    } else {
+                    if (!$approvedLeave) {
                         $countTanpaKeterangan++;
                     }
                 } else {

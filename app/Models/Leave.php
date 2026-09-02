@@ -130,8 +130,8 @@ class Leave extends Model
     {
         return self::where('user_id', $userId)
             ->where('status', 'disetujui')
-            ->where('tanggal_mulai', '<=', $dateString)
-            ->where('tanggal_selesai', '>=', $dateString)
+            ->whereDate('tanggal_mulai', '<=', $dateString)
+            ->whereDate('tanggal_selesai', '>=', $dateString)
             ->first();
     }
 }

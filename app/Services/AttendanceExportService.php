@@ -101,15 +101,17 @@ class AttendanceExportService
                 $approvedAttendances = $allDayAttendances->where('approval_status', 'diterima');
                 $rejectedAttendances = $allDayAttendances->where('approval_status', 'ditolak');
 
+                if ($approvedLeave) {
+                    // Pegawai memiliki izin/cuti resmi yang disetujui (tidak dianggap ALFA)
+                    if ($approvedLeave->jenis_cuti === 'cuti_tahunan') $countCutiTahunan++;
+                    elseif ($approvedLeave->jenis_cuti === 'cuti_sakit') $countCutiSakit++;
+                    elseif ($approvedLeave->jenis_cuti === 'cuti_luar_negeri') $countCutiLN++;
+                    else $countCutiLainnya++;
+                }
+
                 if ($allDayAttendances->isEmpty()) {
-                    if ($approvedLeave) {
-                        // Employee is on approved leave (do not count as Tanpa Keterangan / ALFA)
-                        if ($approvedLeave->jenis_cuti === 'cuti_tahunan') $countCutiTahunan++;
-                        elseif ($approvedLeave->jenis_cuti === 'cuti_sakit') $countCutiSakit++;
-                        elseif ($approvedLeave->jenis_cuti === 'cuti_luar_negeri') $countCutiLN++;
-                        else $countCutiLainnya++;
-                    } else {
-                        // No attendance and not on leave on a working day
+                    if (!$approvedLeave) {
+                        // Tidak hadir sama sekali dan tidak ada izin cuti di hari kerja
                         $countTanpaKeterangan++;
                     }
                 } else {

@@ -42,11 +42,12 @@ class KaryawanController extends Controller
 
         // Mengambil seluruh presensi milik pegawai hari ini berdasarkan sesi
         $myAttendances = Attendance::where('user_id', $user->id)
-            ->where('tanggal', $today)
+            ->whereDate('tanggal', $today)
             ->get()
             ->keyBy('tipe');
 
         $setting = Setting::getOfficeSetting();
+        $todayLeave = Leave::getUserLeaveOnDate($user->id, $today);
 
         // Menyusun status 4 sesi presensi harian
         $types = ['masuk', 'istirahat', 'masuk_istirahat', 'pulang'];
@@ -57,6 +58,7 @@ class KaryawanController extends Controller
             $attendanceRecord = $myAttendances->get($tipe);
             $isApproved = $attendanceRecord && $attendanceRecord->approval_status === 'diterima';
             $isRejected = $attendanceRecord && $attendanceRecord->approval_status === 'ditolak';
+            $isOnLeave = !empty($todayLeave) && !$isApproved;
 
             $cards[$tipe] = [
                 'tipe' => $tipe,
@@ -65,10 +67,12 @@ class KaryawanController extends Controller
                 'record' => $attendanceRecord,
                 'has_attended' => $isApproved,
                 'is_rejected' => $isRejected,
+                'is_on_leave' => $isOnLeave,
+                'leave' => $todayLeave,
             ];
         }
 
-        return view('karyawan.dashboard', compact('user', 'schedule', 'cards', 'today', 'now', 'setting'));
+        return view('karyawan.dashboard', compact('user', 'schedule', 'cards', 'today', 'now', 'setting', 'todayLeave'));
     }
 
     /**
@@ -113,7 +117,7 @@ class KaryawanController extends Controller
 
         // 1. Cek apakah sudah pernah melakukan presensi yang disetujui pada sesi ini
         $existingApproved = Attendance::where('user_id', $user->id)
-            ->where('tanggal', $today)
+            ->whereDate('tanggal', $today)
             ->where('tipe', $request->tipe)
             ->where('approval_status', 'diterima')
             ->first();
@@ -130,7 +134,7 @@ class KaryawanController extends Controller
 
         // Hapus rekaman presensi sebelumnya jika berstatus ditolak agar pegawai bisa mengirim ulang foto yang valid
         Attendance::where('user_id', $user->id)
-            ->where('tanggal', $today)
+            ->whereDate('tanggal', $today)
             ->where('tipe', $request->tipe)
             ->where('approval_status', 'ditolak')
             ->delete();
