@@ -674,7 +674,9 @@
                 <div class="signature-box">
                     <div class="signature-date">&nbsp;</div>
                     <div class="signature-title">
-                        Mengetahui,<br>
+                        @if($setting->tampilkan_mengetahui)
+                            Mengetahui,<br>
+                        @endif
                         {{ ucwords(strtolower($setting->jabatan_ketua ?? 'Ketua Pengadilan Tinggi Pontianak')) }},
                     </div>
                     <div class="signature-name">
@@ -814,7 +816,9 @@
                         {{ ucwords(strtolower($setting->kota_surat ?? 'Pontianak')) }}, {{ \Carbon\Carbon::parse($tanggal_selesai)->locale('id')->isoFormat('D MMMM Y') }}
                     </div>
                     <div class="signature-title">
-                        Mengetahui,<br>
+                        @if($setting->tampilkan_mengetahui)
+                            Mengetahui,<br>
+                        @endif
                         {{ ucwords(strtolower($setting->jabatan_ketua ?? 'Ketua Pengadilan Tinggi Pontianak')) }},
                     </div>
                     <div class="signature-name">

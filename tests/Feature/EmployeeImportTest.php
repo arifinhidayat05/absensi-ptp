@@ -358,4 +358,96 @@ class EmployeeImportTest extends TestCase
         $importResult = session('import_result');
         $this->assertEquals('error', $importResult['status']);
     }
+
+    public function test_operator_can_import_from_csv_with_semicolon_delimiter()
+    {
+        $operator = $this->createOperator();
+
+        $csvContent = "NIP;NAMA;KATEGORI;JABATAN;SEKOLAH;NO HP;EMAIL\n" .
+                      "199003032020011009;Agus Setiawan;pegawai;Staff TI;;081234112233;agus@pt-pontianak.go.id\n";
+
+        // Simpan tanpa ekstensi .csv pada temp path seperti upload asli PHP
+        $tempPath = tempnam(sys_get_temp_dir(), 'php_test_csv_');
+        file_put_contents($tempPath, $csvContent);
+
+        $uploadedFile = new UploadedFile(
+            $tempPath,
+            'pegawai_import.csv',
+            'text/csv',
+            null,
+            true
+        );
+
+        $response = $this->actingAs($operator)->post('/operator/employees/import-excel', [
+            'excel_file' => $uploadedFile,
+        ]);
+
+        $response->assertRedirect('/operator/employees');
+        $response->assertSessionHas('success');
+
+        $this->assertDatabaseHas('users', [
+            'nip' => '199003032020011009',
+            'name' => 'Agus Setiawan',
+            'role' => 'karyawan',
+            'jabatan' => 'Staff TI',
+            'no_hp' => '081234112233',
+        ]);
+
+        if (file_exists($tempPath)) {
+            @unlink($tempPath);
+        }
+    }
+
+    public function test_operator_can_import_excel_with_raw_temp_upload_file()
+    {
+        $operator = $this->createOperator();
+
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setCellValue('A1', 'NIP');
+        $sheet->setCellValue('B1', 'NAMA');
+        $sheet->setCellValue('C1', 'KATEGORI');
+        $sheet->setCellValue('D1', 'JABATAN');
+        $sheet->setCellValue('E1', 'ASAL');
+        $sheet->setCellValue('F1', 'NO HP');
+        $sheet->setCellValue('G1', 'EMAIL');
+
+        $sheet->setCellValue('A2', '199205052021011010');
+        $sheet->setCellValue('B2', 'Citra Kirana');
+        $sheet->setCellValue('C2', 'pegawai');
+        $sheet->setCellValue('D2', 'Analis Hukum');
+        $sheet->setCellValue('E2', '');
+        $sheet->setCellValue('F2', '081399887766');
+        $sheet->setCellValue('G2', 'citra@pt-pontianak.go.id');
+
+        // Path sementara TANPA ekstensi .xlsx (mensimulasikan perilaku temp file PHP upload /tmp/phpXXXX)
+        $tempPath = tempnam(sys_get_temp_dir(), 'php_upload_raw_');
+        (new Xlsx($spreadsheet))->save($tempPath);
+
+        $uploadedFile = new UploadedFile(
+            $tempPath,
+            'data_pegawai.xlsx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            null,
+            true
+        );
+
+        $response = $this->actingAs($operator)->post('/operator/employees/import-excel', [
+            'excel_file' => $uploadedFile,
+        ]);
+
+        $response->assertRedirect('/operator/employees');
+        $response->assertSessionHas('success');
+
+        $this->assertDatabaseHas('users', [
+            'nip' => '199205052021011010',
+            'name' => 'Citra Kirana',
+            'jabatan' => 'Analis Hukum',
+        ]);
+
+        if (file_exists($tempPath)) {
+            @unlink($tempPath);
+        }
+    }
 }
+

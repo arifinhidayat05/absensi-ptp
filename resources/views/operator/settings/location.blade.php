@@ -85,6 +85,19 @@
                                 class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:ring-emerald-500 focus:border-emerald-500">
                         </div>
                     </div>
+
+                    <!-- Toggle Tampilkan Tulisan "Mengetahui" pada Laporan -->
+                    <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex items-center justify-between">
+                        <div class="pr-2">
+                            <span class="text-xs font-bold text-slate-900 block">Teks "Mengetahui"</span>
+                            <span class="text-[11px] text-slate-500">Tampilkan tulisan "Mengetahui," di atas jabatan pimpinan pada tanda tangan laporan (Excel & Cetak).</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input type="hidden" name="tampilkan_mengetahui" value="0">
+                            <input type="checkbox" name="tampilkan_mengetahui" value="1" id="tampilkan_mengetahui" {{ $setting->tampilkan_mengetahui ? 'checked' : '' }} class="sr-only peer">
+                            <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#064e3b]"></div>
+                        </label>
+                    </div>
                 </div>
 
                 <!-- 2. Parameter Lokasi Kantor Card -->

@@ -747,6 +747,135 @@ class OperatorController extends Controller
     }
 
     /**
+     * Membaca berkas spreadsheet secara aman berdasarkan ekstensi berkas,
+     * tanpa bergantung pada fungsi mime_content_type() PHP yang rapuh.
+     *
+     * @param string $filePath
+     * @param string $extension
+     * @return Spreadsheet
+     * @throws \Throwable
+     */
+    public static function loadSpreadsheetSafely(string $filePath, string $extension): Spreadsheet
+    {
+        // Polyfill darurat jika PHP di server belum mengaktifkan ekstensi fileinfo (mime_content_type)
+        if (!function_exists('mime_content_type')) {
+            /**
+             * Fallback polyfill untuk mime_content_type
+             */
+            function mime_content_type(string $filename): string|false
+            {
+                if (!file_exists($filename) || !is_readable($filename)) {
+                    return false;
+                }
+
+                $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+                $mimes = [
+                    'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'xlsm' => 'application/vnd.ms-excel.sheet.macroEnabled.12',
+                    'xls'  => 'application/vnd.ms-excel',
+                    'csv'  => 'text/csv',
+                    'tsv'  => 'text/tab-separated-values',
+                    'txt'  => 'text/plain',
+                    'html' => 'text/html',
+                    'htm'  => 'text/html',
+                ];
+
+                if (!empty($ext) && isset($mimes[$ext])) {
+                    return $mimes[$ext];
+                }
+
+                $handle = @fopen($filename, 'rb');
+                if ($handle) {
+                    $bytes = fread($handle, 8);
+                    fclose($handle);
+
+                    if (str_starts_with($bytes, "PK\x03\x04")) {
+                        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                    }
+                    if (str_starts_with($bytes, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")) {
+                        return 'application/vnd.ms-excel';
+                    }
+                }
+
+                return 'text/plain';
+            }
+        }
+
+        $extension = strtolower($extension);
+
+        // Tentukan reader prioritas berdasarkan ekstensi asli berkas
+        $readersToTry = match ($extension) {
+            'xlsx' => ['Xlsx', 'Xls', 'Csv'],
+            'xls'  => ['Xls', 'Xlsx', 'Csv', 'Html'],
+            'csv'  => ['Csv'],
+            default => ['Xlsx', 'Xls', 'Csv'],
+        };
+
+        $lastException = null;
+
+        foreach ($readersToTry as $readerType) {
+            try {
+                /** @var \PhpOffice\PhpSpreadsheet\Reader\IReader $reader */
+                $reader = IOFactory::createReader($readerType);
+
+                if ($reader instanceof \PhpOffice\PhpSpreadsheet\Reader\Csv) {
+                    $reader->setInputEncoding('UTF-8');
+                    $reader->setDelimiter(self::detectCsvDelimiter($filePath));
+                } elseif (method_exists($reader, 'setReadDataOnly')) {
+                    // Hanya baca data teks sel untuk menghemat memori & mempercepat load
+                    $reader->setReadDataOnly(true);
+                }
+
+                return $reader->load($filePath);
+            } catch (\Throwable $e) {
+                $lastException = $e;
+            }
+        }
+
+        // Fallback terakhir dengan IOFactory
+        try {
+            return IOFactory::load($filePath);
+        } catch (\Throwable $e) {
+            throw ($lastException ?? $e);
+        }
+    }
+
+    /**
+     * Mendeteksi pemisah (delimiter) berkas CSV secara otomatis (koma, titik koma, tab, atau pipa).
+     *
+     * @param string $filePath
+     * @return string
+     */
+    public static function detectCsvDelimiter(string $filePath): string
+    {
+        $handle = @fopen($filePath, 'r');
+        if (!$handle) {
+            return ',';
+        }
+
+        $firstLine = fgets($handle);
+        fclose($handle);
+
+        if ($firstLine === false) {
+            return ',';
+        }
+
+        $delimiters = [',', ';', "\t", '|'];
+        $bestDelimiter = ',';
+        $maxCount = 0;
+
+        foreach ($delimiters as $delim) {
+            $count = substr_count($firstLine, $delim);
+            if ($count > $maxCount) {
+                $maxCount = $count;
+                $bestDelimiter = $delim;
+            }
+        }
+
+        return $bestDelimiter;
+    }
+
+    /**
      * Memproses import data pegawai / peserta magang secara massal dari berkas Excel (.xlsx, .xls, .csv).
      *
      * @param Request $request
@@ -795,7 +924,7 @@ class OperatorController extends Controller
         }
 
         try {
-            $spreadsheet = IOFactory::load($file->getRealPath());
+            $spreadsheet = self::loadSpreadsheetSafely($file->getRealPath(), $extension);
             $sheet = $spreadsheet->getActiveSheet();
             $highestRow = $sheet->getHighestRow();
 
@@ -1123,16 +1252,27 @@ class OperatorController extends Controller
      */
     public function exportReports(Request $request)
     {
-        $tanggal_mulai = $request->get('tanggal_mulai', Carbon::now()->startOfMonth()->format('Y-m-d'));
-        $tanggal_selesai = $request->get('tanggal_selesai', Carbon::today()->format('Y-m-d'));
-        $user_id = $request->get('user_id');
+        if (!extension_loaded('zip')) {
+            return back()->with('error', 'Fitur Ekspor Excel membutuhkan ekstensi PHP "zip" (ZipArchive) yang saat ini belum aktif di server hosting cPanel Anda. Silakan aktifkan modul "zip" di cPanel melalui menu "Select PHP Version" -> tab "Extensions".');
+        }
 
-        $exportService = new AttendanceExportService();
-        return $exportService->exportBook1Format(
-            $tanggal_mulai,
-            $tanggal_selesai,
-            $user_id ? (int)$user_id : null
-        );
+        try {
+            $tanggal_mulai = $request->get('tanggal_mulai', Carbon::now()->startOfMonth()->format('Y-m-d'));
+            $tanggal_selesai = $request->get('tanggal_selesai', Carbon::today()->format('Y-m-d'));
+            $user_id = $request->get('user_id');
+
+            $exportService = new AttendanceExportService();
+            return $exportService->exportBook1Format(
+                $tanggal_mulai,
+                $tanggal_selesai,
+                $user_id ? (int)$user_id : null
+            );
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Export Excel Error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return back()->with('error', 'Gagal membuat file Excel: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -1429,6 +1569,7 @@ class OperatorController extends Controller
             'longitude_kantor' => 'required|numeric',
             'radius_meter' => 'required|integer|min:10|max:10000',
             'enforce_radius' => 'nullable|boolean',
+            'tampilkan_mengetahui' => 'nullable|boolean',
         ], [
             'nama_kantor.required' => 'Nama kantor wajib diisi.',
             'nama_ketua.required' => 'Nama Ketua / Pejabat Penandatangan wajib diisi.',
@@ -1440,9 +1581,26 @@ class OperatorController extends Controller
             'radius_meter.required' => 'Batas radius (meter) wajib diisi.',
         ]);
 
-        $validated['enforce_radius'] = $request->has('enforce_radius');
+        $validated['enforce_radius'] = $request->boolean('enforce_radius');
+        $tampilkanMengetahui = $request->boolean('tampilkan_mengetahui');
+        $validated['tampilkan_mengetahui'] = $tampilkanMengetahui;
+
+        // Simpan status ke cache agar langsung efektif meskipun migrasi di database server belum dijalankan
+        cache()->forever('setting_tampilkan_mengetahui', $tampilkanMengetahui ? '1' : '0');
 
         $setting = Setting::getOfficeSetting();
+
+        // Cek dan buat kolom jika belum ada di database server
+        if (!\Illuminate\Support\Facades\Schema::hasColumn('settings', 'tampilkan_mengetahui')) {
+            try {
+                \Illuminate\Support\Facades\Schema::table('settings', function (\Illuminate\Database\Schema\Blueprint $table) {
+                    $table->boolean('tampilkan_mengetahui')->default(true)->after('kota_surat');
+                });
+            } catch (\Throwable $e) {
+                unset($validated['tampilkan_mengetahui']);
+            }
+        }
+
         $setting->update($validated);
 
         return redirect()->route('operator.location.index')

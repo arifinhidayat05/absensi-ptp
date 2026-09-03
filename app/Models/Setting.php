@@ -27,6 +27,7 @@ class Setting extends Model
         'nip_ketua',
         'satker_name',
         'kota_surat',
+        'tampilkan_mengetahui',
         'latitude_kantor',
         'longitude_kantor',
         'radius_meter',
@@ -41,7 +42,26 @@ class Setting extends Model
         'longitude_kantor' => 'float',
         'radius_meter' => 'integer',
         'enforce_radius' => 'boolean',
+        'tampilkan_mengetahui' => 'boolean',
     ];
+
+    /**
+     * Default nilai tampilkan_mengetahui ke true jika belum diset
+     */
+    public function getTampilkanMengetahuiAttribute($value)
+    {
+        if ($value !== null) {
+            return (bool)$value;
+        }
+
+        // Cek fallback cache jika kolom belum ada di database server
+        $cached = cache()->get('setting_tampilkan_mengetahui');
+        if ($cached !== null) {
+            return $cached === '1' || $cached === true || $cached === 1;
+        }
+
+        return true;
+    }
 
     /**
      * Mengambil baris pengaturan instansi pertama (singleton), atau membuat pengaturan default jika belum ada.
@@ -50,6 +70,16 @@ class Setting extends Model
      */
     public static function getOfficeSetting()
     {
+        try {
+            if (!\Illuminate\Support\Facades\Schema::hasColumn('settings', 'tampilkan_mengetahui')) {
+                \Illuminate\Support\Facades\Schema::table('settings', function (\Illuminate\Database\Schema\Blueprint $table) {
+                    $table->boolean('tampilkan_mengetahui')->default(true)->after('kota_surat');
+                });
+            }
+        } catch (\Throwable $e) {
+            // Fallback aman jika database tidak mengizinkan alter table langsung
+        }
+
         $setting = self::first();
         if (!$setting) {
             $setting = self::create([
@@ -59,6 +89,7 @@ class Setting extends Model
                 'nip_ketua' => null,
                 'satker_name' => 'PENGADILAN TINGGI PONTIANAK',
                 'kota_surat' => 'Pontianak',
+                'tampilkan_mengetahui' => true,
                 'latitude_kantor' => -0.0576339,
                 'longitude_kantor' => 109.3516038,
                 'radius_meter' => 200,

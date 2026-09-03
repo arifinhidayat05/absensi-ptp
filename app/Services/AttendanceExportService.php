@@ -14,7 +14,8 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
-use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Layanan Ekspor Rekapitulasi Presensi ke Format Excel Resmi (Book1.xlsx)
@@ -28,16 +29,18 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class AttendanceExportService
 {
     /**
-     * Menghasilkan dan mengalirkan berkas unduhan spreadsheet Excel rekapitulasi presensi.
+     * Menghasilkan berkas unduhan spreadsheet Excel rekapitulasi presensi.
      *
      * @param string $tanggal_mulai Batas awal periode tanggal (format Y-m-d)
      * @param string $tanggal_selesai Batas akhir periode tanggal (format Y-m-d)
      * @param int|null $user_id ID pegawai spesifik (jika difilter 1 orang) atau null untuk seluruh pegawai
-     * @return StreamedResponse Aliran respons berkas Excel untuk diunduh oleh peramban pengguna
+     * @return BinaryFileResponse Aliran respons berkas Excel untuk diunduh oleh peramban pengguna
      */
-    public function exportBook1Format(string $tanggal_mulai, string $tanggal_selesai, ?int $user_id = null): StreamedResponse
+    public function exportBook1Format(string $tanggal_mulai, string $tanggal_selesai, ?int $user_id = null): BinaryFileResponse
     {
         Carbon::setLocale('id');
+        @ini_set('memory_limit', '512M');
+        @set_time_limit(300);
 
         $start = Carbon::parse($tanggal_mulai)->startOfDay();
         $end = Carbon::parse($tanggal_selesai)->endOfDay();
@@ -55,6 +58,32 @@ class AttendanceExportService
 
         // 2. Membuat deretan tanggal harian dalam rentang periode
         $period = CarbonPeriod::create($start, $end);
+
+        // Pre-cache jadwal kerja untuk seluruh tanggal dalam periode (menghindari ribuan query berulang)
+        $schedulesByDate = [];
+        foreach ($period as $date) {
+            $dStr = $date->format('Y-m-d');
+            $schedulesByDate[$dStr] = Schedule::getScheduleForDate($dStr);
+        }
+
+        // Preload seluruh presensi dan izin pegawai dalam rentang tanggal sekaligus (sangat cepat & ramah resource server cPanel)
+        $empIds = $employees->pluck('id')->toArray();
+        $startDateStr = $start->format('Y-m-d');
+        $endDateStr = $end->format('Y-m-d');
+
+        $attendancesGrouped = Attendance::whereIn('user_id', $empIds)
+            ->whereBetween('tanggal', [$startDateStr, $endDateStr])
+            ->get()
+            ->groupBy(function ($att) {
+                return $att->user_id . '_' . Carbon::parse($att->tanggal)->format('Y-m-d');
+            });
+
+        $leavesGrouped = Leave::whereIn('user_id', $empIds)
+            ->where('status', 'disetujui')
+            ->whereDate('tanggal_mulai', '<=', $endDateStr)
+            ->whereDate('tanggal_selesai', '>=', $startDateStr)
+            ->get()
+            ->groupBy('user_id');
 
         // 3. Menghitung akumulasi statistik kehadiran per pegawai
         $employeeStats = [];
@@ -76,6 +105,8 @@ class AttendanceExportService
             $countCutiLN = 0;
             $countCutiLainnya = 0;
 
+            $userLeaves = $leavesGrouped->get($emp->id, collect());
+
             foreach ($period as $date) {
                 $dateStr = $date->format('Y-m-d');
 
@@ -85,18 +116,20 @@ class AttendanceExportService
                 }
 
                 // Check schedule for day (libur/weekend)
-                $schedule = Schedule::getScheduleForDate($dateStr);
+                $schedule = $schedulesByDate[$dateStr] ?? Schedule::getScheduleForDate($dateStr);
                 if ($schedule->is_libur) {
                     continue;
                 }
 
                 // Check if user is on approved leave on this working day
-                $approvedLeave = Leave::getUserLeaveOnDate($emp->id, $dateStr);
+                $approvedLeave = $userLeaves->first(function ($l) use ($dateStr) {
+                    $mulai = Carbon::parse($l->tanggal_mulai)->format('Y-m-d');
+                    $selesai = Carbon::parse($l->tanggal_selesai)->format('Y-m-d');
+                    return $mulai <= $dateStr && $selesai >= $dateStr;
+                });
 
-                // Fetch all attendances on that day for employee
-                $allDayAttendances = Attendance::where('user_id', $emp->id)
-                    ->where('tanggal', $dateStr)
-                    ->get();
+                // Fetch attendances on that day for employee from preloaded collection
+                $allDayAttendances = $attendancesGrouped->get($emp->id . '_' . $dateStr, collect());
 
                 $approvedAttendances = $allDayAttendances->where('approval_status', 'diterima');
                 $rejectedAttendances = $allDayAttendances->where('approval_status', 'ditolak');
@@ -343,10 +376,17 @@ class AttendanceExportService
         $sheet->getStyle("A{$currRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT)->setVertical(Alignment::VERTICAL_CENTER);
 
         $sheet->mergeCells("L{$currRow}:N{$currRow}");
-        $sheet->setCellValue("L{$currRow}", $jabatanKetua . ",");
+        $tampilkanMengetahui = (bool) $setting->tampilkan_mengetahui;
+        if ($tampilkanMengetahui) {
+            $sheet->setCellValue("L{$currRow}", "Mengetahui,\n" . $jabatanKetua . ",");
+            $sheet->getStyle("L{$currRow}")->getAlignment()->setWrapText(true);
+            $sheet->getRowDimension($currRow)->setRowHeight(28);
+        } else {
+            $sheet->setCellValue("L{$currRow}", $jabatanKetua . ",");
+            $sheet->getRowDimension($currRow)->setRowHeight(16);
+        }
         $sheet->getStyle("L{$currRow}")->getFont()->setSize(11)->setBold(true);
         $sheet->getStyle("L{$currRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
-        $sheet->getRowDimension($currRow)->setRowHeight(16);
 
         $currRow++;
         $sheet->setCellValue("A{$currRow}", "Masuk = Jam Masuk (Sesi Pagi)");
@@ -425,16 +465,25 @@ class AttendanceExportService
         // File output name
         $fileName = 'Laporan_Rekap_Presensi_PPTK_' . str_replace('-', '', $tanggal_mulai) . '_sd_' . str_replace('-', '', $tanggal_selesai) . '.xlsx';
 
-        $response = new StreamedResponse(function () use ($spreadsheet) {
-            $writer = new Xlsx($spreadsheet);
-            $writer->save('php://output');
-        });
+        // Pastikan folder temp storage siap dan aman dari buffer/interupsi web server hosting
+        $tempDir = storage_path('app/temp');
+        if (!file_exists($tempDir)) {
+            @mkdir($tempDir, 0775, true);
+        }
+        if (!is_writable($tempDir)) {
+            $tempDir = sys_get_temp_dir();
+        }
 
-        $response->headers->set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        $response->headers->set('Content-Disposition', 'attachment; filename="' . $fileName . '"');
-        $response->headers->set('Cache-Control', 'max-age=0');
-        $response->headers->set('Pragma', 'public');
+        $tempFilePath = rtrim($tempDir, '/\\') . DIRECTORY_SEPARATOR . 'rekap_' . uniqid('', true) . '.xlsx';
 
-        return $response;
+        $writer = new Xlsx($spreadsheet);
+        $writer->save($tempFilePath);
+
+        return response()->download($tempFilePath, $fileName, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Pragma' => 'no-cache',
+            'Expires' => '0',
+        ])->deleteFileAfterSend(true);
     }
 }
