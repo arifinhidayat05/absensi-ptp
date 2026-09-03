@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Pengajuan & Riwayat Cuti - Pengadilan Tinggi Pontianak')
+@section('title', 'Pengajuan & Riwayat Izin / Cuti - Pengadilan Tinggi Pontianak')
 
 @section('content')
 <div class="space-y-6">
@@ -9,10 +9,10 @@
     <div class="bg-[#064e3b] rounded-3xl p-6 sm:p-8 text-white shadow-xl border border-emerald-800 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
             <span class="px-3.5 py-1 bg-amber-400 text-slate-950 text-xs font-black rounded-full uppercase tracking-wider mb-3 inline-block shadow">
-                <i class="fa-solid fa-calendar-check me-1 text-emerald-900"></i> Portal Cuti Pegawai
+                <i class="fa-solid fa-calendar-check me-1 text-emerald-900"></i> Portal Izin / Cuti Pegawai
             </span>
             <h1 class="text-2xl sm:text-3xl font-black tracking-tight text-white">
-                Pengajuan &amp; Riwayat Cuti
+                Pengajuan &amp; Riwayat Izin / Cuti
             </h1>
             <p class="text-xs sm:text-sm text-emerald-100 font-bold mt-2">
                 Nama: <strong class="text-amber-300">{{ $user->name }}</strong> &bull; {{ $user->tipe_identitas_label }}: <span class="font-mono">{{ $user->nip }}</span>

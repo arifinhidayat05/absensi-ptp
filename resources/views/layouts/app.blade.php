@@ -140,7 +140,7 @@
                 <a href="{{ route('operator.leaves.index') }}"
                     class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition duration-150 {{ request()->routeIs('operator.leaves.*') ? 'bg-emerald-800 text-amber-300 border border-amber-400/40 shadow-sm font-extrabold' : 'text-emerald-100 hover:bg-emerald-800/70 hover:text-white font-bold' }}">
                     <i class="fa-solid fa-calendar-check w-5 text-center text-sm {{ request()->routeIs('operator.leaves.*') ? 'text-amber-300' : 'text-emerald-300' }}"></i>
-                    <span>Cuti Pegawai</span>
+                    <span>Izin / Cuti Pegawai</span>
                 </a>
 
                 <!-- MENU SECTION: LAPORAN & SISTEM -->
@@ -186,7 +186,7 @@
                 <a href="{{ route('karyawan.cuti.index') }}"
                     class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition duration-150 {{ request()->routeIs('karyawan.cuti.*') ? 'bg-emerald-800 text-amber-300 border border-amber-400/40 shadow-sm font-extrabold' : 'text-emerald-100 hover:bg-emerald-800/70 hover:text-white font-bold' }}">
                     <i class="fa-solid fa-calendar-check w-5 text-center text-sm {{ request()->routeIs('karyawan.cuti.*') ? 'text-amber-300' : 'text-emerald-300' }}"></i>
-                    <span>Pengajuan Cuti</span>
+                    <span>Pengajuan Izin / Cuti</span>
                 </a>
 
                 <div class="px-2 pt-4 pb-1 text-[10px] font-black uppercase tracking-wider text-emerald-300/60">
@@ -395,10 +395,10 @@
                     <i class="fa-solid fa-users text-base mb-0.5"></i>
                     <span class="text-[9px] tracking-tight">Pegawai</span>
                 </a>
-                <!-- Cuti -->
+                <!-- Izin / Cuti -->
                 <a href="{{ route('operator.leaves.index') }}" class="flex flex-col items-center justify-center flex-1 py-1 text-center {{ request()->routeIs('operator.leaves.*') ? 'text-amber-300 font-bold' : 'text-emerald-200/70 hover:text-white' }}">
                     <i class="fa-solid fa-calendar-check text-base mb-0.5"></i>
-                    <span class="text-[9px] tracking-tight">Cuti</span>
+                    <span class="text-[9px] tracking-tight">Izin/Cuti</span>
                 </a>
                 <!-- Menu / Sidebar Drawer -->
                 <button type="button" onclick="toggleSidebar()" class="flex flex-col items-center justify-center flex-1 py-1 text-center text-emerald-200/70 hover:text-white cursor-pointer">
@@ -416,10 +416,10 @@
                     <i class="fa-solid fa-history text-base mb-0.5"></i>
                     <span class="text-[9px] tracking-tight">Riwayat</span>
                 </a>
-                <!-- Cuti -->
+                <!-- Izin / Cuti -->
                 <a href="{{ route('karyawan.cuti.index') }}" class="flex flex-col items-center justify-center flex-1 py-1 text-center {{ request()->routeIs('karyawan.cuti.*') ? 'text-amber-300 font-bold' : 'text-emerald-200/70 hover:text-white' }}">
                     <i class="fa-solid fa-calendar-check text-base mb-0.5"></i>
-                    <span class="text-[9px] tracking-tight">Cuti</span>
+                    <span class="text-[9px] tracking-tight">Izin/Cuti</span>
                 </a>
                 <!-- Profil / Akun -->
                 <a href="{{ route('karyawan.profile') }}" class="flex flex-col items-center justify-center flex-1 py-1 text-center {{ request()->routeIs('karyawan.profile') ? 'text-amber-300 font-bold' : 'text-emerald-200/70 hover:text-white' }}">

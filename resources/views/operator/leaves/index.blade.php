@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Manajemen Cuti Pegawai - Pengadilan Tinggi Pontianak')
+@section('title', 'Manajemen Izin / Cuti Pegawai - Pengadilan Tinggi Pontianak')
 
 @section('content')
 <div class="space-y-6">
@@ -10,21 +10,21 @@
         <div>
             <div class="flex items-center gap-2">
                 <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-300">
-                    Modul Cuti
+                    Modul Izin / Cuti
                 </span>
                 <span class="text-xs text-slate-400">&bull;</span>
                 <span class="text-xs font-bold text-slate-500">Pengadilan Tinggi Pontianak</span>
             </div>
             <h1 class="text-xl sm:text-2xl font-black text-slate-900 flex items-center gap-2 mt-1">
-                <i class="fa-solid fa-calendar-check text-emerald-700"></i> Manajemen Cuti Pegawai
+                <i class="fa-solid fa-calendar-check text-emerald-700"></i> Manajemen Izin / Cuti Pegawai
             </h1>
-            <p class="text-xs text-slate-500 mt-1">Kelola dan pantau daftar Cuti Tahunan, Cuti Sakit, Cuti Luar Negeri, dan izin dinas pegawai.</p>
+            <p class="text-xs text-slate-500 mt-1">Kelola dan pantau pengajuan Izin Cuti Tahunan, Cuti Sakit, Cuti Luar Negeri, dan izin dinas pegawai.</p>
         </div>
 
         <div class="flex items-center gap-2 flex-wrap">
             <button onclick="openCreateModal()"
                 class="px-4 py-2.5 bg-[#064e3b] hover:bg-[#043d2e] text-white font-bold rounded-xl text-xs shadow-md transition flex items-center gap-2 border border-emerald-700">
-                <i class="fa-solid fa-plus text-amber-300 text-sm"></i> Catat Cuti Pegawai
+                <i class="fa-solid fa-plus text-amber-300 text-sm"></i> Catat Izin / Cuti Pegawai
             </button>
         </div>
     </div>
