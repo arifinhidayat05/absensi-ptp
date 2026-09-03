@@ -673,22 +673,13 @@
                 </tbody>
             </table>
 
-            <!-- Dual Signature Section (Pegawai & Ketua) -->
+            <!-- Dual Signature Section (Ketua di Kiri dengan Mengetahui, Mahasiswa di Kanan) -->
             <div class="footer-grid">
+                <!-- Kiri: Pejabat yang Mengetahui (Ketua) -->
                 <div class="signature-box">
                     <div class="signature-date">&nbsp;</div>
-                    <div class="signature-title">{{ $singleEmployee->isMagang() ? 'Mahasiswa / Siswa Magang,' : 'Pegawai yang Bersangkutan,' }}</div>
-                    <div class="signature-name">{{ $singleEmployee->name }}</div>
-                    @if(!empty($singleEmployee->nip))
-                        <div class="signature-nip">{{ $singleEmployee->tipe_identitas_label }}. {{ $singleEmployee->nip }}</div>
-                    @endif
-                </div>
-
-                <div class="signature-box">
-                    <div class="signature-date">
-                        {{ $setting->kota_surat ?? 'Pontianak' }}, {{ \Carbon\Carbon::parse($tanggal_selesai)->locale('id')->isoFormat('D MMMM Y') }}
-                    </div>
                     <div class="signature-title">
+                        Mengetahui,<br>
                         {{ $setting->jabatan_ketua ?? 'Ketua Pengadilan Tinggi Pontianak' }},
                     </div>
                     <div class="signature-name">
@@ -698,6 +689,21 @@
                         <div class="signature-nip">
                             NIP. {{ $setting->nip_ketua }}
                         </div>
+                    @endif
+                </div>
+
+                <!-- Kanan: Mahasiswa Magang / Pegawai yang Bersangkutan -->
+                <div class="signature-box">
+                    <div class="signature-date">
+                        {{ $setting->kota_surat ?? 'Pontianak' }}, {{ \Carbon\Carbon::parse($tanggal_selesai)->locale('id')->isoFormat('D MMMM Y') }}
+                    </div>
+                    <div class="signature-title">
+                        <br>
+                        {{ $singleEmployee->isMagang() ? 'Mahasiswa / Siswa Magang,' : 'Pegawai yang Bersangkutan,' }}
+                    </div>
+                    <div class="signature-name">{{ $singleEmployee->name }}</div>
+                    @if(!empty($singleEmployee->nip))
+                        <div class="signature-nip">{{ $singleEmployee->tipe_identitas_label }}. {{ $singleEmployee->nip }}</div>
                     @endif
                 </div>
             </div>
@@ -809,6 +815,7 @@
                         {{ $setting->kota_surat ?? 'Pontianak' }}, {{ \Carbon\Carbon::parse($tanggal_selesai)->locale('id')->isoFormat('D MMMM Y') }}
                     </div>
                     <div class="signature-title">
+                        Mengetahui,<br>
                         {{ $setting->jabatan_ketua ?? 'Ketua Pengadilan Tinggi Pontianak' }},
                     </div>
                     <div class="signature-name">
