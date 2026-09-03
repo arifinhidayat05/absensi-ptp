@@ -530,27 +530,27 @@
                 <!-- Attendance Summary Stats Bar -->
                 <div class="emp-stats-bar">
                     <div class="emp-stat-item">
-                        <div class="num">{{ $stat['total_hari_kerja'] }}</div>
+                        <div class="num">{{ $stat['total_hari_kerja'] ?? 0 }}</div>
                         <div class="lbl">Hari Kerja</div>
                     </div>
                     <div class="emp-stat-item">
-                        <div class="num text-emerald-800">{{ $stat['tepat_waktu'] }}</div>
+                        <div class="num text-emerald-800">{{ $stat['tepat_waktu'] ?? 0 }}</div>
                         <div class="lbl">Tepat Waktu</div>
                     </div>
                     <div class="emp-stat-item">
-                        <div class="num text-amber-800">{{ $stat['terlambat'] }}</div>
+                        <div class="num text-amber-800">{{ $stat['terlambat'] ?? 0 }}</div>
                         <div class="lbl">Terlambat</div>
                     </div>
                     <div class="emp-stat-item">
-                        <div class="num">{{ $stat['lebih_awal'] }}</div>
+                        <div class="num">{{ $stat['lebih_awal'] ?? 0 }}</div>
                         <div class="lbl">Lebih Awal</div>
                     </div>
                     <div class="emp-stat-item">
-                        <div class="num text-emerald-800">{{ $stat['cuti_total'] }}</div>
+                        <div class="num text-emerald-800">{{ $stat['cuti_total'] ?? (($stat['cuti_tahunan'] ?? 0) + ($stat['cuti_sakit'] ?? 0) + ($stat['cuti_luar_negeri'] ?? 0) + ($stat['cuti_lainnya'] ?? 0)) }}</div>
                         <div class="lbl">Total Cuti</div>
                     </div>
                     <div class="emp-stat-item">
-                        <div class="num text-rose-700">{{ $stat['tanpa_keterangan'] }}</div>
+                        <div class="num text-rose-700">{{ $stat['tanpa_keterangan'] ?? 0 }}</div>
                         <div class="lbl">Tanpa Ket. (ALFA)</div>
                     </div>
                 </div>

@@ -1166,6 +1166,9 @@ class OperatorController extends Controller
             $employees = User::where('role', 'karyawan')->orderBy('name', 'asc')->get();
         }
 
+        $startDateStr = $start->format('Y-m-d');
+        $endDateStr = $end->format('Y-m-d');
+
         $employeeStats = [];
 
         foreach ($employees as $emp) {
@@ -1186,6 +1189,18 @@ class OperatorController extends Controller
             $countCutiLainnya = 0;
             $totalHariKerja = 0;
 
+            // Preload presensi dan izin pegawai untuk rentang tanggal agar query sangat cepat
+            $empAttendances = Attendance::where('user_id', $emp->id)
+                ->whereBetween('tanggal', [$startDateStr, $endDateStr])
+                ->get()
+                ->groupBy('tanggal');
+
+            $empLeaves = Leave::where('user_id', $emp->id)
+                ->where('status', 'disetujui')
+                ->whereDate('tanggal_mulai', '<=', $endDateStr)
+                ->whereDate('tanggal_selesai', '>=', $startDateStr)
+                ->get();
+
             foreach ($period as $date) {
                 $dateStr = $date->format('Y-m-d');
 
@@ -1199,11 +1214,11 @@ class OperatorController extends Controller
                 }
 
                 $totalHariKerja++;
-                $approvedLeave = Leave::getUserLeaveOnDate($emp->id, $dateStr);
+                $approvedLeave = $empLeaves->first(function ($l) use ($dateStr) {
+                    return $l->tanggal_mulai <= $dateStr && $l->tanggal_selesai >= $dateStr;
+                });
 
-                $allDayAttendances = Attendance::where('user_id', $emp->id)
-                    ->where('tanggal', $dateStr)
-                    ->get();
+                $allDayAttendances = $empAttendances->get($dateStr, collect());
 
                 $approvedAttendances = $allDayAttendances->where('approval_status', 'diterima');
                 $rejectedAttendances = $allDayAttendances->where('approval_status', 'ditolak');
@@ -1244,6 +1259,8 @@ class OperatorController extends Controller
             if ($countCutiLainnya > 0) $keteranganParts[] = "Cuti Lainnya: {$countCutiLainnya} hr";
             $keteranganText = implode(', ', $keteranganParts);
 
+            $cutiTotal = $countCutiTahunan + $countCutiSakit + $countCutiLN + $countCutiLainnya;
+
             $employeeStats[] = [
                 'user' => $emp,
                 'total_hari_kerja' => $totalHariKerja,
@@ -1256,6 +1273,7 @@ class OperatorController extends Controller
                 'lebih_awal' => $countLebihAwal,
                 'ditolak' => $countDitolak,
                 'tanpa_keterangan' => $countTanpaKeterangan,
+                'cuti_total' => $cutiTotal,
                 'cuti_tahunan' => $countCutiTahunan,
                 'cuti_sakit' => $countCutiSakit,
                 'cuti_luar_negeri' => $countCutiLN,
@@ -1266,15 +1284,26 @@ class OperatorController extends Controller
 
         // If a single employee is selected, build the day-by-day timesheet records
         if ($singleEmployee) {
+            $singleAttendances = Attendance::where('user_id', $singleEmployee->id)
+                ->whereBetween('tanggal', [$startDateStr, $endDateStr])
+                ->get()
+                ->groupBy('tanggal');
+
+            $singleLeaves = Leave::where('user_id', $singleEmployee->id)
+                ->where('status', 'disetujui')
+                ->whereDate('tanggal_mulai', '<=', $endDateStr)
+                ->whereDate('tanggal_selesai', '>=', $startDateStr)
+                ->get();
+
             foreach ($period as $date) {
                 $dateStr = $date->format('Y-m-d');
                 $schedule = Schedule::getScheduleForDate($dateStr);
                 $isFuture = $date->gt($today);
-                $approvedLeave = Leave::getUserLeaveOnDate($singleEmployee->id, $dateStr);
+                $approvedLeave = $singleLeaves->first(function ($l) use ($dateStr) {
+                    return $l->tanggal_mulai <= $dateStr && $l->tanggal_selesai >= $dateStr;
+                });
 
-                $dayAttendances = Attendance::where('user_id', $singleEmployee->id)
-                    ->where('tanggal', $dateStr)
-                    ->get();
+                $dayAttendances = $singleAttendances->get($dateStr, collect());
 
                 $masuk = $dayAttendances->firstWhere('tipe', 'masuk');
                 $istirahat = $dayAttendances->firstWhere('tipe', 'istirahat');
