@@ -638,7 +638,7 @@
 
                             <!-- Status & Keterangan Harian -->
                             <td class="text-left">
-                                @if($rec['is_libur'])
+                                @if($rec['is_libur'] && empty($rec['masuk']) && empty($rec['pulang']) && !$rec['leave'])
                                     <span style="color: #555;">{{ ucwords(strtolower($rec['status_harian'])) }}</span>
                                 @elseif($rec['leave'])
                                     <strong>

@@ -1193,7 +1193,9 @@ class OperatorController extends Controller
             $empAttendances = Attendance::where('user_id', $emp->id)
                 ->whereBetween('tanggal', [$startDateStr, $endDateStr])
                 ->get()
-                ->groupBy('tanggal');
+                ->groupBy(function ($att) {
+                    return Carbon::parse($att->tanggal)->format('Y-m-d');
+                });
 
             $empLeaves = Leave::where('user_id', $emp->id)
                 ->where('status', 'disetujui')
@@ -1209,16 +1211,19 @@ class OperatorController extends Controller
                 }
 
                 $schedule = Schedule::getScheduleForDate($dateStr);
-                if ($schedule->is_libur) {
+                $allDayAttendances = $empAttendances->get($dateStr, collect());
+
+                // Jika hari libur dan tidak ada rekaman presensi sama sekali, lewati
+                if ($schedule->is_libur && $allDayAttendances->isEmpty()) {
                     continue;
                 }
 
                 $totalHariKerja++;
                 $approvedLeave = $empLeaves->first(function ($l) use ($dateStr) {
-                    return $l->tanggal_mulai <= $dateStr && $l->tanggal_selesai >= $dateStr;
+                    $mulai = Carbon::parse($l->tanggal_mulai)->format('Y-m-d');
+                    $selesai = Carbon::parse($l->tanggal_selesai)->format('Y-m-d');
+                    return $mulai <= $dateStr && $selesai >= $dateStr;
                 });
-
-                $allDayAttendances = $empAttendances->get($dateStr, collect());
 
                 $approvedAttendances = $allDayAttendances->where('approval_status', 'diterima');
                 $rejectedAttendances = $allDayAttendances->where('approval_status', 'ditolak');
@@ -1287,7 +1292,9 @@ class OperatorController extends Controller
             $singleAttendances = Attendance::where('user_id', $singleEmployee->id)
                 ->whereBetween('tanggal', [$startDateStr, $endDateStr])
                 ->get()
-                ->groupBy('tanggal');
+                ->groupBy(function ($att) {
+                    return Carbon::parse($att->tanggal)->format('Y-m-d');
+                });
 
             $singleLeaves = Leave::where('user_id', $singleEmployee->id)
                 ->where('status', 'disetujui')
@@ -1300,7 +1307,9 @@ class OperatorController extends Controller
                 $schedule = Schedule::getScheduleForDate($dateStr);
                 $isFuture = $date->gt($today);
                 $approvedLeave = $singleLeaves->first(function ($l) use ($dateStr) {
-                    return $l->tanggal_mulai <= $dateStr && $l->tanggal_selesai >= $dateStr;
+                    $mulai = Carbon::parse($l->tanggal_mulai)->format('Y-m-d');
+                    $selesai = Carbon::parse($l->tanggal_selesai)->format('Y-m-d');
+                    return $mulai <= $dateStr && $selesai >= $dateStr;
                 });
 
                 $dayAttendances = $singleAttendances->get($dateStr, collect());
@@ -1314,21 +1323,8 @@ class OperatorController extends Controller
                 $statusHarian = '';
                 $statusBadgeClass = '';
 
-                if ($schedule->is_libur) {
-                    $statusHarian = 'Libur (' . ($schedule->keterangan_libur ?: 'Akhir Pekan') . ')';
-                    $statusBadgeClass = 'libur';
-                } elseif ($approvedLeave) {
-                    $statusHarian = Leave::getJenisCutiLabel($approvedLeave->jenis_cuti);
-                    $statusBadgeClass = 'cuti';
-                } elseif ($dayAttendances->isEmpty()) {
-                    if ($isFuture) {
-                        $statusHarian = '-';
-                        $statusBadgeClass = 'future';
-                    } else {
-                        $statusHarian = 'Tanpa Keterangan (ALFA)';
-                        $statusBadgeClass = 'alfa';
-                    }
-                } else {
+                // Prioritaskan rekaman presensi nyata bila ada (termasuk jika diinput manual di hari libur/akhir pekan)
+                if ($dayAttendances->isNotEmpty()) {
                     $rejected = $dayAttendances->where('approval_status', 'ditolak');
                     if ($rejected->isNotEmpty()) {
                         $statusHarian = 'Ditolak: ' . ($rejected->first()->catatan_operator ?: 'Foto Invalid');
@@ -1358,6 +1354,18 @@ class OperatorController extends Controller
                             $statusBadgeClass = 'hadir';
                         }
                     }
+                } elseif ($approvedLeave) {
+                    $statusHarian = Leave::getJenisCutiLabel($approvedLeave->jenis_cuti);
+                    $statusBadgeClass = 'cuti';
+                } elseif ($schedule->is_libur) {
+                    $statusHarian = 'Libur (' . ($schedule->keterangan_libur ?: 'Akhir Pekan') . ')';
+                    $statusBadgeClass = 'libur';
+                } elseif ($isFuture) {
+                    $statusHarian = '-';
+                    $statusBadgeClass = 'future';
+                } else {
+                    $statusHarian = 'Tanpa Keterangan (ALFA)';
+                    $statusBadgeClass = 'alfa';
                 }
 
                 $dailyRecords[] = [
