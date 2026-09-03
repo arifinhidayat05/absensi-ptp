@@ -131,6 +131,12 @@
                     <span>Data Pegawai</span>
                 </a>
 
+                <a href="{{ route('operator.attendances.index') }}"
+                    class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition duration-150 {{ request()->routeIs('operator.attendances.*') ? 'bg-emerald-800 text-amber-300 border border-amber-400/40 shadow-sm font-extrabold' : 'text-emerald-100 hover:bg-emerald-800/70 hover:text-white font-bold' }}">
+                    <i class="fa-solid fa-clipboard-user w-5 text-center text-sm {{ request()->routeIs('operator.attendances.*') ? 'text-amber-300' : 'text-emerald-300' }}"></i>
+                    <span>Input / Edit Presensi</span>
+                </a>
+
                 <a href="{{ route('operator.leaves.index') }}"
                     class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition duration-150 {{ request()->routeIs('operator.leaves.*') ? 'bg-emerald-800 text-amber-300 border border-amber-400/40 shadow-sm font-extrabold' : 'text-emerald-100 hover:bg-emerald-800/70 hover:text-white font-bold' }}">
                     <i class="fa-solid fa-calendar-check w-5 text-center text-sm {{ request()->routeIs('operator.leaves.*') ? 'text-amber-300' : 'text-emerald-300' }}"></i>

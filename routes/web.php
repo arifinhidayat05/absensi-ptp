@@ -54,6 +54,13 @@ Route::middleware(['auth', 'operator'])->prefix('operator')->name('operator.')->
     Route::post('/attendances/{id}/reject', [OperatorController::class, 'rejectAttendance'])->name('attendances.reject'); // Tolak presensi (foto invalid/ALFA)
     Route::post('/attendances/{id}/approve', [OperatorController::class, 'approveAttendance'])->name('attendances.approve'); // Setujui kembali presensi
 
+    // Manajemen Input & Edit Presensi Pegawai (Manual Entry Operator)
+    Route::get('/attendances', [OperatorController::class, 'attendanceManageIndex'])->name('attendances.index'); // Tampilan daftar presensi, filter, dan form input/edit
+    Route::post('/attendances/manual', [OperatorController::class, 'attendanceManualStore'])->name('attendances.manual-store'); // Simpan input presensi manual
+    Route::get('/attendances/{id}/json', [OperatorController::class, 'attendanceShowJson'])->name('attendances.show-json'); // Ambil data presensi (JSON) untuk modal edit
+    Route::put('/attendances/{id}', [OperatorController::class, 'attendanceUpdate'])->name('attendances.update'); // Simpan perubahan edit presensi
+    Route::delete('/attendances/{id}', [OperatorController::class, 'attendanceDestroy'])->name('attendances.destroy'); // Hapus data presensi
+
     // Pengaturan Instansi & Radius Geofencing GPS Kantor
     Route::get('/location', [OperatorController::class, 'locationSettingsIndex'])->name('location.index'); // Form setting GPS kantor
     Route::post('/location', [OperatorController::class, 'locationSettingsUpdate'])->name('location.update'); // Simpan koordinat & pejabat penandatangan

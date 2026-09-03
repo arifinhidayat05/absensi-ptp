@@ -1993,4 +1993,490 @@ class OperatorController extends Controller
 
         return back()->with('success', 'Foto profil berhasil dihapus.');
     }
+
+    /**
+     * Menampilkan antarmuka pengelolaan presensi: filter data, riwayat presensi harian, dan modal input/edit manual.
+     *
+     * @param Request $request
+     * @return \Illuminate\View\View
+     */
+    public function attendanceManageIndex(Request $request)
+    {
+        $tanggal = $request->get('tanggal', Carbon::today()->format('Y-m-d'));
+        $user_id = $request->get('user_id');
+        $tipe = $request->get('tipe');
+        $status = $request->get('status');
+        $approval_status = $request->get('approval_status');
+        $sumber = $request->get('sumber'); // 'semua', 'manual', 'karyawan'
+        $search = $request->get('search');
+
+        $query = Attendance::with('user');
+
+        if ($tanggal) {
+            $query->whereDate('tanggal', $tanggal);
+        }
+
+        if ($user_id) {
+            $query->where('user_id', $user_id);
+        }
+
+        if ($tipe) {
+            $query->where('tipe', $tipe);
+        }
+
+        if ($status) {
+            $query->where('status', $status);
+        }
+
+        if ($approval_status) {
+            $query->where('approval_status', $approval_status);
+        }
+
+        if ($sumber === 'manual') {
+            $query->where(function ($q) {
+                $q->where('alamat', 'like', '%manual%')
+                  ->orWhere('ip_address', 'like', '%manual%')
+                  ->orWhere('foto', 'like', '%manual%');
+            });
+        } elseif ($sumber === 'karyawan') {
+            $query->where(function ($q) {
+                $q->where('alamat', 'not like', '%manual%')
+                  ->where('ip_address', 'not like', '%manual%')
+                  ->where('foto', 'not like', '%manual%');
+            });
+        }
+
+        if ($search) {
+            $query->whereHas('user', function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('nip', 'like', "%{$search}%");
+            });
+        }
+
+        // Summary Counts untuk tanggal terpilih
+        $baseCountQuery = Attendance::query();
+        if ($tanggal) {
+            $baseCountQuery->whereDate('tanggal', $tanggal);
+        }
+        $totalAll = (clone $baseCountQuery)->count();
+        $totalTepatWaktu = (clone $baseCountQuery)->where('status', 'tepat_waktu')->count();
+        $totalTerlambat = (clone $baseCountQuery)->where('status', 'terlambat')->count();
+        $totalLebihAwal = (clone $baseCountQuery)->where('status', 'lebih_awal')->count();
+        $totalManual = (clone $baseCountQuery)->where(function ($q) {
+            $q->where('alamat', 'like', '%manual%')
+              ->orWhere('ip_address', 'like', '%manual%')
+              ->orWhere('foto', 'like', '%manual%');
+        })->count();
+
+        $attendances = $query->orderBy('tanggal', 'desc')->orderBy('waktu', 'desc')->paginate(20)->withQueryString();
+        $employees = User::where('role', 'karyawan')->orderBy('name', 'asc')->get();
+        $setting = Setting::getOfficeSetting();
+        $selectedDate = $tanggal ?: Carbon::today()->format('Y-m-d');
+        $schedule = Schedule::getScheduleForDate($selectedDate);
+
+        return view('operator.attendances.index', compact(
+            'attendances',
+            'employees',
+            'setting',
+            'schedule',
+            'tanggal',
+            'user_id',
+            'tipe',
+            'status',
+            'approval_status',
+            'sumber',
+            'search',
+            'totalAll',
+            'totalTepatWaktu',
+            'totalTerlambat',
+            'totalLebihAwal',
+            'totalManual'
+        ));
+    }
+
+    /**
+     * Menyimpan input presensi manual oleh operator (Mendukung Sesi Tunggal & Input Lengkap 1 Hari).
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function attendanceManualStore(Request $request)
+    {
+        $modeInput = $request->get('mode_input', 'single');
+        $setting = Setting::getOfficeSetting();
+        $lat = $setting->latitude_kantor ?: -0.026330;
+        $lng = $setting->longitude_kantor ?: 109.342500;
+        $officeName = $setting->nama_kantor ?: 'Kantor PT Pontianak';
+        $alamat = 'Input Manual oleh Operator (' . $officeName . ')';
+
+        // -------------------------------------------------------------
+        // MODE BATCH: Input Lengkap Sekaligus Beberapa Sesi Dalam 1 Hari
+        // -------------------------------------------------------------
+        if ($modeInput === 'batch') {
+            $validated = $request->validate([
+                'user_id' => 'required|exists:users,id',
+                'tanggal' => 'required|date',
+                'sessions' => 'required|array|min:1',
+                'sessions.*' => 'in:masuk,istirahat,masuk_istirahat,pulang',
+                'catatan_operator' => 'nullable|string|max:500',
+                'foto' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:5120',
+            ], [
+                'user_id.required' => 'Pegawai wajib dipilih.',
+                'tanggal.required' => 'Tanggal presensi wajib diisi.',
+                'sessions.required' => 'Pilih minimal satu sesi presensi yang ingin diinput.',
+                'foto.max' => 'Ukuran berkas foto maksimal 5MB.',
+            ]);
+
+            $user = User::findOrFail($validated['user_id']);
+            $tanggal = $validated['tanggal'];
+            $schedule = Schedule::getScheduleForDate($tanggal);
+            $overwrite = $request->boolean('overwrite', false);
+            $catatan = $validated['catatan_operator'] ?: 'Input manual oleh operator';
+
+            // Upload foto bukti pendukung jika ada
+            $sharedFoto = 'images/manual_attendance.png';
+            if ($request->hasFile('foto') && $request->file('foto')->isValid()) {
+                $folder = 'uploads/absensi';
+                $fullFolder = public_path($folder);
+                if (!File::exists($fullFolder)) {
+                    File::makeDirectory($fullFolder, 0755, true, true);
+                }
+                $file = $request->file('foto');
+                $ext = strtolower($file->getClientOriginalExtension() ?: 'jpg');
+                $filename = 'manual_' . $user->id . '_batch_' . time() . '_' . uniqid() . '.' . $ext;
+                $file->move($fullFolder, $filename);
+                $sharedFoto = $folder . '/' . $filename;
+            }
+
+            $createdCount = 0;
+            $updatedCount = 0;
+            $skippedCount = 0;
+
+            foreach ($validated['sessions'] as $tipe) {
+                // Jam target atau jam kustom yang diinputkan
+                $jamInput = $request->input("jam_{$tipe}");
+                if (empty($jamInput)) {
+                    $jamInput = match ($tipe) {
+                        'masuk' => substr($schedule->jam_masuk, 0, 5),
+                        'istirahat' => substr($schedule->jam_istirahat, 0, 5),
+                        'masuk_istirahat' => substr($schedule->jam_masuk_istirahat, 0, 5),
+                        'pulang' => substr($schedule->jam_pulang, 0, 5),
+                        default => '08:00',
+                    };
+                }
+
+                $waktu = Carbon::parse($tanggal . ' ' . $jamInput);
+
+                // Penentuan status kehadiran
+                $statusInput = $request->input("status_{$tipe}", 'auto');
+                if ($statusInput !== 'auto' && in_array($statusInput, ['tepat_waktu', 'terlambat', 'lebih_awal'])) {
+                    $status = $statusInput;
+                } else {
+                    $targetTime = match ($tipe) {
+                        'masuk' => $schedule->jam_masuk,
+                        'istirahat' => $schedule->jam_istirahat,
+                        'masuk_istirahat' => $schedule->jam_masuk_istirahat,
+                        'pulang' => $schedule->jam_pulang,
+                        default => '08:00:00',
+                    };
+                    $targetDateTime = Carbon::parse($tanggal . ' ' . $targetTime);
+                    $status = Attendance::determineStatus($tipe, $waktu, $targetDateTime);
+                }
+
+                $existing = Attendance::where('user_id', $user->id)
+                    ->where('tanggal', $tanggal)
+                    ->where('tipe', $tipe)
+                    ->first();
+
+                if ($existing) {
+                    if ($overwrite) {
+                        $updateData = [
+                            'waktu' => $waktu,
+                            'status' => $status,
+                            'approval_status' => 'diterima',
+                            'catatan_operator' => $catatan,
+                            'alamat' => $alamat,
+                            'ip_address' => 'Manual (Operator)',
+                        ];
+                        if ($sharedFoto !== 'images/manual_attendance.png') {
+                            $updateData['foto'] = $sharedFoto;
+                        }
+                        $existing->update($updateData);
+                        $updatedCount++;
+                    } else {
+                        $skippedCount++;
+                    }
+                } else {
+                    Attendance::create([
+                        'user_id' => $user->id,
+                        'tanggal' => $tanggal,
+                        'tipe' => $tipe,
+                        'waktu' => $waktu,
+                        'foto' => $sharedFoto,
+                        'latitude' => $lat,
+                        'longitude' => $lng,
+                        'alamat' => $alamat,
+                        'ip_address' => 'Manual (Operator)',
+                        'status' => $status,
+                        'approval_status' => 'diterima',
+                        'catatan_operator' => $catatan,
+                    ]);
+                    $createdCount++;
+                }
+            }
+
+            $summary = [];
+            if ($createdCount > 0) $summary[] = "{$createdCount} sesi baru dibuat";
+            if ($updatedCount > 0) $summary[] = "{$updatedCount} sesi diperbarui";
+            if ($skippedCount > 0) $summary[] = "{$skippedCount} sesi dilewati (sudah ada)";
+
+            return redirect()->route('operator.attendances.index', ['tanggal' => $tanggal])
+                ->with('success', 'Presensi manual pegawai ' . $user->name . ' berhasil diproses (' . implode(', ', $summary) . ').');
+        }
+
+        // -------------------------------------------------------------
+        // MODE TUNGGAL: Input 1 Sesi Presensi Spesifik
+        // -------------------------------------------------------------
+        $validated = $request->validate([
+            'user_id' => 'required|exists:users,id',
+            'tanggal' => 'required|date',
+            'tipe' => 'required|in:masuk,istirahat,masuk_istirahat,pulang',
+            'jam' => 'required',
+            'status_mode' => 'nullable|in:otomatis,manual',
+            'status' => 'nullable|in:tepat_waktu,terlambat,lebih_awal',
+            'approval_status' => 'required|in:diterima,ditolak',
+            'catatan_operator' => 'nullable|string|max:500',
+            'foto' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:5120',
+        ], [
+            'user_id.required' => 'Pegawai wajib dipilih.',
+            'tanggal.required' => 'Tanggal presensi wajib diisi.',
+            'tipe.required' => 'Tipe sesi presensi wajib dipilih.',
+            'jam.required' => 'Jam presensi wajib diisi.',
+            'approval_status.required' => 'Status approval wajib dipilih.',
+            'foto.max' => 'Ukuran berkas foto maksimal 5MB.',
+        ]);
+
+        $user = User::findOrFail($validated['user_id']);
+        $tanggal = $validated['tanggal'];
+        $tipe = $validated['tipe'];
+        $jam = $validated['jam'];
+        $waktu = Carbon::parse($tanggal . ' ' . $jam);
+        $schedule = Schedule::getScheduleForDate($tanggal);
+        $overwrite = $request->boolean('overwrite', false);
+
+        // Hitung Status Ketepatan Waktu
+        if ($request->input('status_mode') === 'manual' && !empty($request->input('status'))) {
+            $status = $request->input('status');
+        } else {
+            $targetTime = match ($tipe) {
+                'masuk' => $schedule->jam_masuk,
+                'istirahat' => $schedule->jam_istirahat,
+                'masuk_istirahat' => $schedule->jam_masuk_istirahat,
+                'pulang' => $schedule->jam_pulang,
+                default => '08:00:00',
+            };
+            $targetDateTime = Carbon::parse($tanggal . ' ' . $targetTime);
+            $status = Attendance::determineStatus($tipe, $waktu, $targetDateTime);
+        }
+
+        // Upload Foto Bukti jika ada
+        $fotoPath = 'images/manual_attendance.png';
+        $hasCustomPhoto = false;
+        if ($request->hasFile('foto') && $request->file('foto')->isValid()) {
+            $folder = 'uploads/absensi';
+            $fullFolder = public_path($folder);
+            if (!File::exists($fullFolder)) {
+                File::makeDirectory($fullFolder, 0755, true, true);
+            }
+            $file = $request->file('foto');
+            $ext = strtolower($file->getClientOriginalExtension() ?: 'jpg');
+            $filename = 'manual_' . $user->id . '_' . $tipe . '_' . time() . '_' . uniqid() . '.' . $ext;
+            $file->move($fullFolder, $filename);
+            $fotoPath = $folder . '/' . $filename;
+            $hasCustomPhoto = true;
+        }
+
+        $existing = Attendance::where('user_id', $user->id)
+            ->where('tanggal', $tanggal)
+            ->where('tipe', $tipe)
+            ->first();
+
+        if ($existing) {
+            if (!$overwrite) {
+                return back()->withInput()->with('error', 'Presensi sesi ' . Attendance::getTipeLabel($tipe) . ' untuk pegawai ' . $user->name . ' pada tanggal ' . $tanggal . ' sudah tercatat! Beri tanda centang pada opsi "Timpa jika data presensi sesi ini sudah ada" jika ingin memperbarui.');
+            }
+
+            $updateData = [
+                'waktu' => $waktu,
+                'status' => $status,
+                'approval_status' => $validated['approval_status'],
+                'catatan_operator' => $validated['catatan_operator'] ?: ($existing->catatan_operator ?: 'Input manual oleh operator'),
+                'alamat' => $existing->alamat ?: $alamat,
+                'ip_address' => 'Manual (Operator)',
+            ];
+            if ($hasCustomPhoto) {
+                $updateData['foto'] = $fotoPath;
+            }
+            $existing->update($updateData);
+
+            return redirect()->route('operator.attendances.index', ['tanggal' => $tanggal])
+                ->with('success', 'Presensi sesi ' . Attendance::getTipeLabel($tipe) . ' untuk pegawai ' . $user->name . ' berhasil diperbarui!');
+        }
+
+        Attendance::create([
+            'user_id' => $user->id,
+            'tanggal' => $tanggal,
+            'tipe' => $tipe,
+            'waktu' => $waktu,
+            'foto' => $fotoPath,
+            'latitude' => $lat,
+            'longitude' => $lng,
+            'alamat' => $alamat,
+            'ip_address' => 'Manual (Operator)',
+            'status' => $status,
+            'approval_status' => $validated['approval_status'],
+            'catatan_operator' => $validated['catatan_operator'] ?: 'Input manual oleh operator',
+        ]);
+
+        return redirect()->route('operator.attendances.index', ['tanggal' => $tanggal])
+            ->with('success', 'Presensi sesi ' . Attendance::getTipeLabel($tipe) . ' untuk pegawai ' . $user->name . ' berhasil dicatat!');
+    }
+
+    /**
+     * Mengambil rincian data presensi dalam format JSON untuk kebutuhan modal edit operator.
+     *
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function attendanceShowJson($id)
+    {
+        $attendance = Attendance::with('user')->findOrFail($id);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $attendance->id,
+                'user_id' => $attendance->user_id,
+                'user_name' => $attendance->user->name ?? 'N/A',
+                'user_nip' => $attendance->user->nip ?? '',
+                'user_identitas' => $attendance->user->identitas_lengkap ?? '',
+                'user_jabatan' => $attendance->user->jabatan ?? '',
+                'tanggal' => Carbon::parse($attendance->tanggal)->format('Y-m-d'),
+                'tanggal_formatted' => Carbon::parse($attendance->tanggal)->translatedFormat('d F Y'),
+                'jam' => Carbon::parse($attendance->waktu)->format('H:i'),
+                'tipe' => $attendance->tipe,
+                'tipe_label' => Attendance::getTipeLabel($attendance->tipe),
+                'status' => $attendance->status,
+                'approval_status' => $attendance->approval_status,
+                'catatan_operator' => $attendance->catatan_operator ?? '',
+                'foto_url' => $attendance->foto_url,
+                'alamat' => $attendance->alamat ?? '',
+                'ip_address' => $attendance->ip_address ?? '',
+                'is_manual' => $attendance->isManual(),
+            ]
+        ]);
+    }
+
+    /**
+     * Memperbarui rekaman data presensi pegawai (Edit Presensi oleh Operator).
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function attendanceUpdate(Request $request, $id)
+    {
+        $attendance = Attendance::with('user')->findOrFail($id);
+
+        $validated = $request->validate([
+            'tanggal' => 'required|date',
+            'tipe' => 'required|in:masuk,istirahat,masuk_istirahat,pulang',
+            'jam' => 'required',
+            'status' => 'required|in:tepat_waktu,terlambat,lebih_awal',
+            'approval_status' => 'required|in:diterima,ditolak',
+            'catatan_operator' => 'nullable|string|max:500',
+            'foto' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:5120',
+        ], [
+            'tanggal.required' => 'Tanggal presensi wajib diisi.',
+            'tipe.required' => 'Tipe sesi presensi wajib dipilih.',
+            'jam.required' => 'Jam presensi wajib diisi.',
+            'status.required' => 'Status ketepatan waktu wajib dipilih.',
+            'approval_status.required' => 'Status approval wajib dipilih.',
+            'foto.max' => 'Ukuran berkas foto maksimal 5MB.',
+        ]);
+
+        // Cek duplikasi jika tanggal atau sesi diubah bentrok dengan rekaman presensi lain milik pegawai
+        $duplicate = Attendance::where('user_id', $attendance->user_id)
+            ->where('tanggal', $validated['tanggal'])
+            ->where('tipe', $validated['tipe'])
+            ->where('id', '!=', $id)
+            ->first();
+
+        if ($duplicate) {
+            return back()->with('error', 'Gagal memperbarui! Sudah ada rekaman presensi sesi ' . Attendance::getTipeLabel($validated['tipe']) . ' untuk pegawai ' . $attendance->user->name . ' pada tanggal ' . $validated['tanggal'] . ' (ID: #' . $duplicate->id . ').');
+        }
+
+        $waktu = Carbon::parse($validated['tanggal'] . ' ' . $validated['jam']);
+
+        $updateData = [
+            'tanggal' => $validated['tanggal'],
+            'tipe' => $validated['tipe'],
+            'waktu' => $waktu,
+            'status' => $validated['status'],
+            'approval_status' => $validated['approval_status'],
+            'catatan_operator' => $validated['catatan_operator'] ?? null,
+        ];
+
+        // Jika operator mengunggah foto bukti baru
+        if ($request->hasFile('foto') && $request->file('foto')->isValid()) {
+            $folder = 'uploads/absensi';
+            $fullFolder = public_path($folder);
+            if (!File::exists($fullFolder)) {
+                File::makeDirectory($fullFolder, 0755, true, true);
+            }
+            $file = $request->file('foto');
+            $ext = strtolower($file->getClientOriginalExtension() ?: 'jpg');
+            $filename = 'edited_' . $attendance->user_id . '_' . $validated['tipe'] . '_' . time() . '_' . uniqid() . '.' . $ext;
+            $file->move($fullFolder, $filename);
+            $updateData['foto'] = $folder . '/' . $filename;
+        }
+
+        $attendance->update($updateData);
+
+        return redirect()->route('operator.attendances.index', ['tanggal' => $validated['tanggal']])
+            ->with('success', 'Data presensi ' . Attendance::getTipeLabel($validated['tipe']) . ' untuk pegawai ' . $attendance->user->name . ' berhasil diperbarui!');
+    }
+
+    /**
+     * Menghapus rekaman data presensi pegawai oleh operator.
+     *
+     * @param int $id
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
+     */
+    public function attendanceDestroy($id, Request $request)
+    {
+        $attendance = Attendance::with('user')->findOrFail($id);
+        $userName = $attendance->user->name ?? 'Pegawai';
+        $tipeLabel = Attendance::getTipeLabel($attendance->tipe);
+        $tanggal = Carbon::parse($attendance->tanggal)->format('d/m/Y');
+
+        // Jika foto rekaman bukan gambar default sistem, hapus berkasnya
+        if ($attendance->foto && !str_contains($attendance->foto, 'manual_attendance.png') && File::exists(public_path($attendance->foto))) {
+            @File::delete(public_path($attendance->foto));
+        }
+
+        $attendance->delete();
+
+        $msg = 'Presensi ' . $tipeLabel . ' (' . $tanggal . ') milik ' . $userName . ' berhasil dihapus dari sistem.';
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => $msg,
+            ]);
+        }
+
+        return back()->with('success', $msg);
+    }
 }

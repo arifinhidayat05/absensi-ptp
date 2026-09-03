@@ -70,6 +70,27 @@ class Attendance extends Model
     }
 
     /**
+     * Memeriksa apakah presensi merupakan hasil input manual oleh operator.
+     */
+    public function isManual(): bool
+    {
+        return str_contains(strtolower($this->alamat ?? ''), 'manual')
+            || str_contains(strtolower($this->ip_address ?? ''), 'manual')
+            || str_contains(strtolower($this->foto ?? ''), 'manual');
+    }
+
+    /**
+     * Mendapatkan URL foto presensi atau foto fallback stempel presensi manual.
+     */
+    public function getFotoUrlAttribute(): string
+    {
+        if (!empty($this->foto) && file_exists(public_path($this->foto))) {
+            return asset($this->foto);
+        }
+        return asset('images/manual_attendance.png');
+    }
+
+    /**
      * Mendapatkan label teks bahasa Indonesia untuk jenis sesi presensi.
      *
      * @param string $tipe Kunci sesi ('masuk', 'istirahat', 'masuk_istirahat', 'pulang')
