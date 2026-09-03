@@ -454,16 +454,17 @@ class KaryawanController extends Controller
 
         $validated = $request->validate([
             'jenis_cuti' => 'required|in:cuti_tahunan,cuti_sakit,cuti_luar_negeri,cuti_alasan_penting,cuti_lainnya',
-            'tanggal_mulai' => 'required|date',
+            'tanggal_mulai' => 'required|date|after_or_equal:today',
             'tanggal_selesai' => 'required|date|after_or_equal:tanggal_mulai',
             'alasan' => 'required|string|max:1000',
             'dokumen' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
         ], [
-            'jenis_cuti.required' => 'Jenis cuti wajib dipilih.',
-            'tanggal_mulai.required' => 'Tanggal mulai cuti wajib diisi.',
-            'tanggal_selesai.required' => 'Tanggal selesai cuti wajib diisi.',
+            'jenis_cuti.required' => 'Jenis izin/cuti wajib dipilih.',
+            'tanggal_mulai.required' => 'Tanggal mulai izin/cuti wajib diisi.',
+            'tanggal_mulai.after_or_equal' => 'Pengajuan izin/cuti tidak dapat dilakukan untuk tanggal yang telah lewat (hanya untuk hari ini atau tanggal mendatang).',
+            'tanggal_selesai.required' => 'Tanggal selesai izin/cuti wajib diisi.',
             'tanggal_selesai.after_or_equal' => 'Tanggal selesai tidak boleh sebelum tanggal mulai.',
-            'alasan.required' => 'Alasan / keterangan cuti wajib diisi.',
+            'alasan.required' => 'Alasan / keterangan izin/cuti wajib diisi.',
             'dokumen.max' => 'Ukuran file dokumen pendukung maksimal 5MB.',
         ]);
 

@@ -105,7 +105,7 @@
                         <label for="tanggal_mulai" class="block text-xs font-bold text-slate-700 mb-1">
                             Mulai Tanggal *
                         </label>
-                        <input type="date" name="tanggal_mulai" id="tanggal_mulai" required value="{{ old('tanggal_mulai', date('Y-m-d')) }}"
+                        <input type="date" name="tanggal_mulai" id="tanggal_mulai" required min="{{ date('Y-m-d') }}" value="{{ old('tanggal_mulai', date('Y-m-d')) }}"
                             class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:ring-emerald-500 focus:border-emerald-500">
                     </div>
 
@@ -113,7 +113,7 @@
                         <label for="tanggal_selesai" class="block text-xs font-bold text-slate-700 mb-1">
                             Sampai Tanggal *
                         </label>
-                        <input type="date" name="tanggal_selesai" id="tanggal_selesai" required value="{{ old('tanggal_selesai', date('Y-m-d')) }}"
+                        <input type="date" name="tanggal_selesai" id="tanggal_selesai" required min="{{ date('Y-m-d') }}" value="{{ old('tanggal_selesai', date('Y-m-d')) }}"
                             class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:ring-emerald-500 focus:border-emerald-500">
                     </div>
                 </div>
@@ -241,3 +241,22 @@
 
 </div>
 @endsection
+
+@push('scripts')
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const tglMulai = document.getElementById('tanggal_mulai');
+        const tglSelesai = document.getElementById('tanggal_selesai');
+        if (tglMulai && tglSelesai) {
+            tglMulai.addEventListener('change', function() {
+                if (this.value) {
+                    tglSelesai.min = this.value;
+                    if (tglSelesai.value && tglSelesai.value < this.value) {
+                        tglSelesai.value = this.value;
+                    }
+                }
+            });
+        }
+    });
+</script>
+@endpush

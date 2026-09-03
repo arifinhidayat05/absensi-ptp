@@ -19,14 +19,14 @@
                 <i class="fa-solid fa-clipboard-user text-emerald-700"></i> Input &amp; Edit Presensi Pegawai
             </h1>
             <p class="text-xs text-slate-500 mt-1">
-                Kelola rekaman kehadiran, input manual presensi pegawai yang terkendala sistem/dinas luar, dan lakukan penyesuaian status presensi.
+                Kelola rekaman kehadiran, input manual presensi (hadir lengkap 1 hari atau izin/sakit/cuti instan), dan lakukan penyesuaian status presensi.
             </p>
         </div>
 
         <div class="flex items-center gap-2 flex-wrap">
             <button type="button" onclick="openCreateModal()"
                 class="px-4 py-2.5 bg-[#064e3b] hover:bg-[#043d2e] text-white font-bold rounded-xl text-xs shadow-md transition flex items-center gap-2 border border-emerald-700 cursor-pointer">
-                <i class="fa-solid fa-plus text-amber-300 text-sm"></i> Input Presensi Manual
+                <i class="fa-solid fa-plus text-amber-300 text-sm"></i> Input Presensi / Izin / Cuti
             </button>
             <a href="{{ route('operator.reports.index', ['tanggal_mulai' => $tanggal, 'tanggal_selesai' => $tanggal]) }}"
                 class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition flex items-center gap-2 border border-slate-300">
@@ -37,14 +37,14 @@
 
     <!-- Summary Stats Grid -->
     <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <!-- Total Presensi -->
+        <!-- Total Presensi Sesi -->
         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-lg border border-slate-200">
                 <i class="fa-solid fa-clipboard-list"></i>
             </div>
             <div>
                 <div class="text-xl font-black text-slate-900">{{ number_format($totalAll) }}</div>
-                <div class="text-[11px] text-slate-500 font-semibold">Total Presensi</div>
+                <div class="text-[11px] text-slate-500 font-semibold">Total Sesi Hadir</div>
             </div>
         </div>
 
@@ -70,14 +70,14 @@
             </div>
         </div>
 
-        <!-- Lebih Awal -->
-        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center font-bold text-lg border border-teal-200">
-                <i class="fa-solid fa-business-time"></i>
+        <!-- Izin / Sakit / Cuti Hari Ini -->
+        <div class="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/25 shadow-sm flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-lg border border-amber-200">
+                <i class="fa-solid fa-calendar-check"></i>
             </div>
             <div>
-                <div class="text-xl font-black text-teal-700">{{ number_format($totalLebihAwal) }}</div>
-                <div class="text-[11px] text-slate-500 font-semibold">Lebih Awal</div>
+                <div class="text-xl font-black text-amber-800">{{ number_format($totalLeavesToday) }}</div>
+                <div class="text-[11px] text-amber-700 font-semibold">Izin / Sakit / Cuti</div>
             </div>
         </div>
 
@@ -92,6 +92,44 @@
             </div>
         </div>
     </div>
+
+    <!-- Banner Informasi Pegawai Sedang Izin / Sakit / Cuti Hari Ini -->
+    @if($totalLeavesToday > 0)
+        <div class="bg-gradient-to-r from-amber-50 to-amber-100/60 border-2 border-amber-300 rounded-2xl p-4 shadow-xs">
+            <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <div class="flex items-center gap-2">
+                    <span class="w-7 h-7 rounded-lg bg-amber-500 text-white flex items-center justify-center font-bold text-xs">
+                        <i class="fa-solid fa-user-shield"></i>
+                    </span>
+                    <h3 class="font-extrabold text-xs sm:text-sm text-amber-950">
+                        Pegawai Berstatus Izin / Sakit / Cuti Hari Ini ({{ $totalLeavesToday }} Pegawai)
+                    </h3>
+                </div>
+                <a href="{{ route('operator.leaves.index') }}" class="text-[11px] font-bold text-amber-900 hover:text-amber-950 underline flex items-center gap-1">
+                    Buka Modul Izin/Cuti <i class="fa-solid fa-arrow-right text-[10px]"></i>
+                </a>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 mt-2">
+                @foreach($leavesToday as $leaveItem)
+                    @php
+                        $badge = \App\Models\Leave::getJenisCutiBadge($leaveItem->jenis_cuti);
+                    @endphp
+                    <div class="bg-white/90 border border-amber-200 rounded-xl p-2.5 flex items-center justify-between gap-2 shadow-2xs">
+                        <div class="min-w-0">
+                            <div class="font-black text-xs text-slate-900 truncate">{{ $leaveItem->user->name ?? 'N/A' }}</div>
+                            <div class="text-[10px] text-slate-500 font-mono">{{ $leaveItem->user->nip ?? '-' }}</div>
+                            @if($leaveItem->alasan)
+                                <div class="text-[10px] text-slate-600 italic truncate mt-0.5" title="{{ $leaveItem->alasan }}">"{{ $leaveItem->alasan }}"</div>
+                            @endif
+                        </div>
+                        <span class="px-2 py-1 rounded-lg text-[10px] font-black uppercase border shrink-0 {{ $badge['bg'] }}">
+                            <i class="{{ $badge['icon'] }} me-1"></i> {{ $badge['label'] }}
+                        </span>
+                    </div>
+                @endforeach
+            </div>
+        </div>
+    @endif
 
     <!-- Filter Form Card -->
     <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
@@ -192,12 +230,12 @@
         <div class="p-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
             <div class="flex items-center gap-2">
                 <i class="fa-solid fa-table-list text-emerald-700"></i>
-                <h3 class="font-black text-sm text-slate-900">Daftar Rekaman Presensi</h3>
-                <span class="text-xs text-slate-400">({{ $attendances->total() }} data)</span>
+                <h3 class="font-black text-sm text-slate-900">Daftar Rekaman Presensi Sesi</h3>
+                <span class="text-xs text-slate-400">({{ $attendances->total() }} baris data)</span>
             </div>
             <div class="text-[11px] text-slate-500">
                 <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold">
-                    <i class="fa-solid fa-pen-to-square"></i> Baris yang dapat di-edit langsung oleh operator
+                    <i class="fa-solid fa-pen-to-square"></i> Klik tombol edit untuk memperbarui jam/status presensi
                 </span>
             </div>
         </div>
@@ -220,6 +258,8 @@
                     @forelse($attendances as $index => $att)
                         @php
                             $isManual = $att->isManual();
+                            // Periksa apakah pegawai ini sedang dalam masa izin/cuti disetujui pada tanggal ini
+                            $hasLeaveToday = $leavesToday->firstWhere('user_id', $att->user_id);
                         @endphp
                         <tr class="hover:bg-slate-50/80 transition {{ $isManual ? 'bg-indigo-50/15' : '' }}">
                             <!-- No -->
@@ -238,7 +278,15 @@
                                         </div>
                                     @endif
                                     <div class="min-w-0">
-                                        <div class="font-black text-slate-900 truncate">{{ $att->user->name ?? 'N/A' }}</div>
+                                        <div class="flex items-center gap-1.5 flex-wrap">
+                                            <span class="font-black text-slate-900 truncate">{{ $att->user->name ?? 'N/A' }}</span>
+                                            @if($hasLeaveToday)
+                                                @php $badgeL = \App\Models\Leave::getJenisCutiBadge($hasLeaveToday->jenis_cuti); @endphp
+                                                <span class="px-1.5 py-0.2 rounded text-[9px] font-bold border {{ $badgeL['bg'] }}" title="Pegawai ini juga memiliki catatan izin/cuti resmi pada tanggal ini">
+                                                    {{ $badgeL['label'] }}
+                                                </span>
+                                            @endif
+                                        </div>
                                         <div class="font-mono text-[10px] text-amber-700 font-semibold">
                                             {{ $att->user->tipe_identitas_label ?? 'NIP' }}. {{ $att->user->nip ?? '-' }}
                                         </div>
@@ -369,7 +417,7 @@
                             <td colspan="8" class="py-12 text-center text-slate-400">
                                 <i class="fa-regular fa-folder-open text-4xl block mb-2 text-slate-300"></i>
                                 <div class="font-bold text-slate-600">Tidak ada rekaman presensi yang sesuai kriteria filter.</div>
-                                <p class="text-xs text-slate-400 mt-1">Gunakan tombol "Input Presensi Manual" di atas untuk menambahkan presensi pegawai baru.</p>
+                                <p class="text-xs text-slate-400 mt-1">Gunakan tombol "Input Presensi / Izin / Cuti" di atas untuk menambahkan data kehadiran atau izin pegawai.</p>
                             </td>
                         </tr>
                     @endforelse
@@ -387,7 +435,7 @@
 </div>
 
 <!-- ========================================================================= -->
-<!-- MODAL: INPUT PRESENSI MANUAL -->
+<!-- MODAL UTAMA: INPUT PRESENSI / IZIN / CUTI MANUAL -->
 <!-- ========================================================================= -->
 <div id="createAttendanceModal" class="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs hidden flex items-center justify-center p-4 overflow-y-auto">
     <div class="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -399,8 +447,8 @@
                     <i class="fa-solid fa-clipboard-user"></i>
                 </div>
                 <div>
-                    <h3 class="font-black text-base text-white leading-tight">Input Presensi Manual</h3>
-                    <p class="text-[11px] text-emerald-200">Mencatat kehadiran pegawai secara manual oleh operator</p>
+                    <h3 class="font-black text-base text-white leading-tight">Input Manual Presensi &amp; Izin / Cuti</h3>
+                    <p class="text-[11px] text-emerald-200">Paket instan 1 hari (hadir semua / izin semua) atau input sesi tunggal</p>
                 </div>
             </div>
             <button type="button" onclick="closeCreateModal()" class="text-white/70 hover:text-white p-2 rounded-xl hover:bg-white/10 transition cursor-pointer">
@@ -408,24 +456,36 @@
             </button>
         </div>
 
-        <!-- Mode Selector Tabs (Sesi Tunggal vs Paket 1 Hari) -->
-        <div class="bg-slate-50 border-b border-slate-200 px-5 pt-3 flex gap-4">
-            <button type="button" id="tabModeSingle" onclick="switchCreateMode('single')"
-                class="pb-2.5 font-bold text-xs border-b-2 border-emerald-700 text-emerald-800 transition flex items-center gap-1.5 cursor-pointer">
-                <i class="fa-solid fa-clock"></i> Sesi Tunggal (1 Sesi)
+        <!-- Mode Selector Tabs: 3 Pilihan Instan -->
+        <div class="bg-slate-100/90 border-b border-slate-200 p-2 grid grid-cols-3 gap-2 text-xs">
+            <!-- Tab 1: Hadir Semua (1 Hari) -->
+            <button type="button" id="tabModeHadirFull" onclick="switchCreateMode('instan_hadir')"
+                class="py-2 px-3 rounded-xl font-black text-center transition flex items-center justify-center gap-1.5 cursor-pointer bg-white text-emerald-800 shadow-xs border border-emerald-600">
+                <i class="fa-solid fa-circle-check text-emerald-600"></i>
+                <span>⚡ Hadir Semua (1 Hari)</span>
             </button>
-            <button type="button" id="tabModeBatch" onclick="switchCreateMode('batch')"
-                class="pb-2.5 font-bold text-xs border-b-2 border-transparent text-slate-500 hover:text-slate-800 transition flex items-center gap-1.5 cursor-pointer">
-                <i class="fa-solid fa-layer-group"></i> Paket Lengkap 1 Hari Sekaligus
+
+            <!-- Tab 2: Izin / Sakit / Cuti (1 Hari) -->
+            <button type="button" id="tabModeIzinFull" onclick="switchCreateMode('instan_izin')"
+                class="py-2 px-3 rounded-xl font-black text-center transition flex items-center justify-center gap-1.5 cursor-pointer text-slate-600 hover:text-slate-900 border border-transparent">
+                <i class="fa-solid fa-notes-medical text-amber-600"></i>
+                <span>💊 Izin / Sakit / Cuti</span>
+            </button>
+
+            <!-- Tab 3: Sesi Tunggal -->
+            <button type="button" id="tabModeSingle" onclick="switchCreateMode('single')"
+                class="py-2 px-3 rounded-xl font-black text-center transition flex items-center justify-center gap-1.5 cursor-pointer text-slate-600 hover:text-slate-900 border border-transparent">
+                <i class="fa-solid fa-clock text-indigo-600"></i>
+                <span>🕒 Sesi Tunggal</span>
             </button>
         </div>
 
         <!-- Form Body (Scrollable) -->
         <form id="formCreateAttendance" action="{{ route('operator.attendances.manual-store') }}" method="POST" enctype="multipart/form-data" class="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
             @csrf
-            <input type="hidden" name="mode_input" id="create_mode_input" value="single">
+            <input type="hidden" name="mode_input" id="create_mode_input" value="instan_hadir">
 
-            <!-- 1. Pilih Pegawai -->
+            <!-- Field Bersama 1: Pilih Pegawai -->
             <div>
                 <label for="create_user_id" class="block font-bold text-slate-700 mb-1">
                     Pilih Pegawai / Peserta Magang <span class="text-rose-500">*</span>
@@ -440,22 +500,109 @@
                 </select>
             </div>
 
-            <!-- 2. Tanggal Presensi -->
+            <!-- Field Bersama 2: Tanggal -->
             <div>
-                <label for="create_tanggal" class="block font-bold text-slate-700 mb-1">
-                    Tanggal Presensi <span class="text-rose-500">*</span>
-                </label>
+                <div class="flex items-center justify-between mb-1">
+                    <label for="create_tanggal" class="block font-bold text-slate-700">
+                        Tanggal Presensi / Izin <span class="text-rose-500">*</span>
+                    </label>
+                    <span class="text-[10px] text-slate-400">Operator dapat memilih tanggal lampau, hari ini, maupun mendatang</span>
+                </div>
                 <input type="date" name="tanggal" id="create_tanggal" value="{{ old('tanggal', $tanggal ?: date('Y-m-d')) }}" required onchange="handleDateChange(this.value)"
                     class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-semibold text-xs focus:ring-emerald-500 focus:border-emerald-500">
             </div>
 
-            <!-- SECTION: SINGLE SESSION MODE -->
-            <div id="sectionSingleMode" class="space-y-4">
+            <!-- ============================================================= -->
+            <!-- SECTION 1: PAKET INSTAN HADIR 1 HARI (HADIR SEMUA) -->
+            <!-- ============================================================= -->
+            <div id="sectionHadirFull" class="space-y-3 bg-emerald-50/50 p-4 rounded-2xl border border-emerald-200">
+                <div class="flex items-center gap-2 text-emerald-900 font-black text-xs">
+                    <i class="fa-solid fa-bolt text-amber-500"></i>
+                    <span>Paket Otomatis Hadir 1 Hari Penuh:</span>
+                </div>
+                <p class="text-[11px] text-emerald-800">
+                    Sistem akan otomatis mencatat <strong class="text-emerald-950">4 sesi presensi lengkap</strong> (Masuk, Istirahat, Masuk Istirahat, Pulang) berstatus <strong>Tepat Waktu</strong> sesuai jam kerja instansi pada tanggal tersebut.
+                </p>
+
+                <!-- Rincian Jam Kerja Sesi -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2">
+                    <div class="bg-white p-2.5 rounded-xl border border-emerald-200">
+                        <div class="text-[10px] text-slate-500 font-bold uppercase">1. Jam Masuk</div>
+                        <input type="time" name="jam_masuk" id="hadir_jam_masuk" value="08:00" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1 text-xs font-mono font-bold mt-1">
+                    </div>
+                    <div class="bg-white p-2.5 rounded-xl border border-emerald-200">
+                        <div class="text-[10px] text-slate-500 font-bold uppercase">2. Istirahat</div>
+                        <input type="time" name="jam_istirahat" id="hadir_jam_istirahat" value="12:00" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1 text-xs font-mono font-bold mt-1">
+                    </div>
+                    <div class="bg-white p-2.5 rounded-xl border border-emerald-200">
+                        <div class="text-[10px] text-slate-500 font-bold uppercase">3. Masuk Ist.</div>
+                        <input type="time" name="jam_masuk_istirahat" id="hadir_jam_masuk_istirahat" value="13:00" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1 text-xs font-mono font-bold mt-1">
+                    </div>
+                    <div class="bg-white p-2.5 rounded-xl border border-emerald-200">
+                        <div class="text-[10px] text-slate-500 font-bold uppercase">4. Jam Pulang</div>
+                        <input type="time" name="jam_pulang" id="hadir_jam_pulang" value="17:00" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1 text-xs font-mono font-bold mt-1">
+                    </div>
+                </div>
+
+                <div class="text-[10px] text-slate-500 italic mt-1">
+                    * Jam di atas terisi otomatis sesuai jam kerja resmi (Jumat otomatis menyesuaikan istirahat 11:30 dan pulang 16:30).
+                </div>
+            </div>
+
+            <!-- ============================================================= -->
+            <!-- SECTION 2: PAKET INSTAN IZIN / SAKIT / CUTI (IZIN SEMUA) -->
+            <!-- ============================================================= -->
+            <div id="sectionIzinFull" class="hidden space-y-3 bg-amber-50/60 p-4 rounded-2xl border border-amber-200">
+                <div class="flex items-center gap-2 text-amber-950 font-black text-xs">
+                    <i class="fa-solid fa-notes-medical text-amber-700"></i>
+                    <span>Paket Izin / Sakit / Cuti Resmi 1 Hari Penuh:</span>
+                </div>
+                <p class="text-[11px] text-amber-800">
+                    Sistem akan mencatat izin tidak hadir pegawai yang langsung berstatus <strong>DISETUJUI</strong> oleh operator, sehingga pegawai dibebaskan dari kewajiban absensi pada hari ini dan tidak terhitung ALFA.
+                </p>
+
+                <!-- Pilihan Kategori Izin / Cuti -->
+                <div>
+                    <label for="create_jenis_cuti" class="block font-bold text-slate-800 mb-1">
+                        Kategori Izin / Cuti <span class="text-rose-500">*</span>
+                    </label>
+                    <select name="jenis_cuti" id="create_jenis_cuti" class="w-full bg-white border border-amber-300 rounded-xl px-3 py-2 font-bold text-xs focus:ring-amber-500 focus:border-amber-500 text-slate-900">
+                        <option value="cuti_sakit">💊 Sakit (Cuti Sakit / Surat Dokter)</option>
+                        <option value="cuti_alasan_penting">📝 Izin / Cuti Alasan Penting (Keluarga / Dinas)</option>
+                        <option value="cuti_tahunan">🏖️ Cuti Tahunan Pegawai</option>
+                        <option value="cuti_luar_negeri">✈️ Cuti ke Luar Negeri</option>
+                        <option value="cuti_lainnya">📌 Izin / Cuti Lainnya</option>
+                    </select>
+                </div>
+
+                <!-- Alasan / Keterangan Izin -->
+                <div>
+                    <label for="create_alasan_cuti" class="block font-bold text-slate-800 mb-1">
+                        Alasan / Keterangan Izin <span class="text-rose-500">*</span>
+                    </label>
+                    <input type="text" name="alasan" id="create_alasan_cuti" placeholder="Contoh: Sakit demam / Izin keperluan keluarga / Penugasan dinas"
+                        class="w-full bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs focus:ring-amber-500 focus:border-amber-500">
+                </div>
+
+                <!-- Upload Dokumen Pendukung (Opsional) -->
+                <div>
+                    <label for="create_dokumen_cuti" class="block font-bold text-slate-800 mb-1">
+                        Lampiran Surat Dokter / Surat Tugas <span class="text-slate-400 font-normal">(Opsional)</span>
+                    </label>
+                    <input type="file" name="dokumen" id="create_dokumen_cuti" accept="application/pdf,image/jpeg,image/png,image/jpg"
+                        class="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-100 file:text-amber-900 hover:file:bg-amber-200 cursor-pointer">
+                </div>
+            </div>
+
+            <!-- ============================================================= -->
+            <!-- SECTION 3: SESI TUNGGAL (1 SESI SPESIFIK) -->
+            <!-- ============================================================= -->
+            <div id="sectionSingleMode" class="hidden space-y-4">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <!-- Tipe Sesi -->
                     <div>
                         <label for="create_tipe" class="block font-bold text-slate-700 mb-1">
-                            Sesi Presensi <span class="text-rose-500">*</span>
+                            Pilih Sesi Presensi <span class="text-rose-500">*</span>
                         </label>
                         <select name="tipe" id="create_tipe" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-semibold text-xs focus:ring-emerald-500 focus:border-emerald-500" onchange="updateDefaultTimeBySession(this.value)">
                             <option value="masuk" selected>Jam Masuk (Pagi)</option>
@@ -471,7 +618,7 @@
                             Jam Presensi (WIB) <span class="text-rose-500">*</span>
                         </label>
                         <input type="time" name="jam" id="create_jam" value="08:00" step="60"
-                            class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-semibold text-xs focus:ring-emerald-500 focus:border-emerald-500">
+                            class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-mono font-bold text-xs focus:ring-emerald-500 focus:border-emerald-500">
                     </div>
                 </div>
 
@@ -502,106 +649,30 @@
                     <!-- Status Approval -->
                     <div>
                         <label for="create_approval_status" class="block font-bold text-slate-700 mb-1">
-                            Status Persetujuan (Approval):
+                            Status Approval:
                         </label>
                         <select name="approval_status" id="create_approval_status" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-semibold text-xs focus:ring-emerald-500 focus:border-emerald-500">
-                            <option value="diterima" selected>Diterima (Hadir)</option>
-                            <option value="ditolak">Ditolak (Dianggap ALFA)</option>
+                            <option value="diterima" selected>Diterima (Valid)</option>
+                            <option value="ditolak">Ditolak (ALFA)</option>
                         </select>
                     </div>
                 </div>
             </div>
 
-            <!-- SECTION: BATCH MODE (4 Sesi Sekaligus) -->
-            <div id="sectionBatchMode" class="hidden space-y-3 bg-emerald-50/40 p-4 rounded-2xl border border-emerald-200">
-                <div class="text-[11px] text-emerald-900 font-bold mb-2 flex items-center gap-1.5">
-                    <i class="fa-solid fa-circle-info text-emerald-700"></i>
-                    Centang sesi yang ingin dibuat dan tentukan jam presensinya:
-                </div>
-
-                <!-- Sesi Masuk -->
-                <div class="flex items-center gap-3 bg-white p-2.5 rounded-xl border border-slate-200">
-                    <label class="flex items-center gap-2 font-black text-slate-800 w-44 cursor-pointer">
-                        <input type="checkbox" name="sessions[]" value="masuk" checked class="rounded text-emerald-600 focus:ring-emerald-500">
-                        <span>1. Jam Masuk</span>
-                    </label>
-                    <div class="flex items-center gap-2 flex-1">
-                        <span class="text-slate-400 font-bold">Jam:</span>
-                        <input type="time" name="jam_masuk" id="batch_jam_masuk" value="08:00" class="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-mono font-bold">
-                        <select name="status_masuk" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs">
-                            <option value="auto" selected>Otomatis (Sesuai Jam Kerja)</option>
-                            <option value="tepat_waktu">Tepat Waktu</option>
-                            <option value="terlambat">Terlambat</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Sesi Istirahat -->
-                <div class="flex items-center gap-3 bg-white p-2.5 rounded-xl border border-slate-200">
-                    <label class="flex items-center gap-2 font-black text-slate-800 w-44 cursor-pointer">
-                        <input type="checkbox" name="sessions[]" value="istirahat" checked class="rounded text-emerald-600 focus:ring-emerald-500">
-                        <span>2. Jam Istirahat</span>
-                    </label>
-                    <div class="flex items-center gap-2 flex-1">
-                        <span class="text-slate-400 font-bold">Jam:</span>
-                        <input type="time" name="jam_istirahat" id="batch_jam_istirahat" value="12:00" class="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-mono font-bold">
-                        <select name="status_istirahat" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs">
-                            <option value="auto" selected>Otomatis (Sesuai Jam Kerja)</option>
-                            <option value="tepat_waktu">Tepat Waktu</option>
-                            <option value="lebih_awal">Lebih Awal</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Sesi Masuk Istirahat -->
-                <div class="flex items-center gap-3 bg-white p-2.5 rounded-xl border border-slate-200">
-                    <label class="flex items-center gap-2 font-black text-slate-800 w-44 cursor-pointer">
-                        <input type="checkbox" name="sessions[]" value="masuk_istirahat" checked class="rounded text-emerald-600 focus:ring-emerald-500">
-                        <span>3. Masuk Istirahat</span>
-                    </label>
-                    <div class="flex items-center gap-2 flex-1">
-                        <span class="text-slate-400 font-bold">Jam:</span>
-                        <input type="time" name="jam_masuk_istirahat" id="batch_jam_masuk_istirahat" value="13:00" class="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-mono font-bold">
-                        <select name="status_masuk_istirahat" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs">
-                            <option value="auto" selected>Otomatis (Sesuai Jam Kerja)</option>
-                            <option value="tepat_waktu">Tepat Waktu</option>
-                            <option value="terlambat">Terlambat</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Sesi Pulang -->
-                <div class="flex items-center gap-3 bg-white p-2.5 rounded-xl border border-slate-200">
-                    <label class="flex items-center gap-2 font-black text-slate-800 w-44 cursor-pointer">
-                        <input type="checkbox" name="sessions[]" value="pulang" checked class="rounded text-emerald-600 focus:ring-emerald-500">
-                        <span>4. Jam Pulang</span>
-                    </label>
-                    <div class="flex items-center gap-2 flex-1">
-                        <span class="text-slate-400 font-bold">Jam:</span>
-                        <input type="time" name="jam_pulang" id="batch_jam_pulang" value="17:00" class="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-mono font-bold">
-                        <select name="status_pulang" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs">
-                            <option value="auto" selected>Otomatis (Sesuai Jam Kerja)</option>
-                            <option value="tepat_waktu">Tepat Waktu</option>
-                            <option value="lebih_awal">Lebih Awal</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 3. Catatan Operator -->
-            <div>
+            <!-- Field Catatan Operator (Untuk Hadir Full & Single) -->
+            <div id="wrapperCatatanOperator">
                 <label for="create_catatan_operator" class="block font-bold text-slate-700 mb-1">
-                    Catatan / Alasan Input Manual:
+                    Catatan Operator <span class="text-slate-400 font-normal">(Opsional)</span>:
                 </label>
                 <textarea name="catatan_operator" id="create_catatan_operator" rows="2"
-                    placeholder="Contoh: Input manual oleh operator karena tugas luar kantor / kendala teknis kamera"
+                    placeholder="Contoh: Input manual oleh operator karena kendala teknis / tugas luar"
                     class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-emerald-500 focus:border-emerald-500"></textarea>
             </div>
 
-            <!-- 4. Upload Foto / Dokumen Bukti (Opsional) -->
-            <div>
+            <!-- Upload Foto Bukti Presensi (Untuk Hadir Full & Single) -->
+            <div id="wrapperFotoPresensi">
                 <label for="create_foto" class="block font-bold text-slate-700 mb-1">
-                    Foto Bukti / Surat Penugasan <span class="text-slate-400 font-normal">(Opsional)</span>
+                    Foto Bukti Presensi <span class="text-slate-400 font-normal">(Opsional)</span>:
                 </label>
                 <div class="flex items-center gap-3">
                     <div class="w-12 h-12 rounded-xl bg-slate-100 border border-slate-300 flex items-center justify-center overflow-hidden shrink-0">
@@ -615,11 +686,11 @@
                 </div>
             </div>
 
-            <!-- 5. Checkbox Overwrite jika duplikasi -->
-            <div class="pt-2 border-t border-slate-100">
+            <!-- Checkbox Overwrite (Untuk Hadir Full & Single) -->
+            <div id="wrapperOverwrite" class="pt-2 border-t border-slate-100">
                 <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
                     <input type="checkbox" name="overwrite" value="1" checked class="rounded text-emerald-600 focus:ring-emerald-500">
-                    <span>Perbarui / timpa data jika presensi pada tanggal dan sesi ini sudah ada</span>
+                    <span>Perbarui / timpa data jika rekaman pada tanggal dan sesi ini sudah ada</span>
                 </label>
             </div>
 
@@ -628,8 +699,9 @@
                 <button type="button" onclick="closeCreateModal()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer">
                     Batal
                 </button>
-                <button type="submit" class="px-5 py-2.5 bg-[#064e3b] hover:bg-[#043d2e] text-white font-bold rounded-xl text-xs shadow-md transition flex items-center gap-2 border border-emerald-700 cursor-pointer">
-                    <i class="fa-solid fa-floppy-disk text-amber-300"></i> Simpan Presensi Manual
+                <button type="submit" id="btnSubmitModal" class="px-5 py-2.5 bg-[#064e3b] hover:bg-[#043d2e] text-white font-bold rounded-xl text-xs shadow-md transition flex items-center gap-2 border border-emerald-700 cursor-pointer">
+                    <i class="fa-solid fa-floppy-disk text-amber-300"></i>
+                    <span id="btnSubmitLabel">Simpan Hadir Lengkap (Semua Sesi)</span>
                 </button>
             </div>
         </form>
@@ -864,27 +936,67 @@
     }
 
     /**
-     * Ganti Mode Input: Sesi Tunggal vs Batch 1 Hari
+     * Ganti Mode Input: Hadir Full vs Izin Full vs Sesi Tunggal
      */
     function switchCreateMode(mode) {
+        const tabHadir = document.getElementById('tabModeHadirFull');
+        const tabIzin = document.getElementById('tabModeIzinFull');
         const tabSingle = document.getElementById('tabModeSingle');
-        const tabBatch = document.getElementById('tabModeBatch');
+
+        const secHadir = document.getElementById('sectionHadirFull');
+        const secIzin = document.getElementById('sectionIzinFull');
         const secSingle = document.getElementById('sectionSingleMode');
-        const secBatch = document.getElementById('sectionBatchMode');
+
+        const wrapCatatan = document.getElementById('wrapperCatatanOperator');
+        const wrapFoto = document.getElementById('wrapperFotoPresensi');
+        const wrapOverwrite = document.getElementById('wrapperOverwrite');
+
         const modeInput = document.getElementById('create_mode_input');
+        const btnSubmit = document.getElementById('btnSubmitModal');
+        const btnLabel = document.getElementById('btnSubmitLabel');
+        const alasanInput = document.getElementById('create_alasan_cuti');
 
         modeInput.value = mode;
 
-        if (mode === 'single') {
-            tabSingle.className = "pb-2.5 font-bold text-xs border-b-2 border-emerald-700 text-emerald-800 transition flex items-center gap-1.5 cursor-pointer";
-            tabBatch.className = "pb-2.5 font-bold text-xs border-b-2 border-transparent text-slate-500 hover:text-slate-800 transition flex items-center gap-1.5 cursor-pointer";
-            secSingle.classList.remove('hidden');
-            secBatch.classList.add('hidden');
+        // Reset all tabs
+        const activeTabClass = "py-2 px-3 rounded-xl font-black text-center transition flex items-center justify-center gap-1.5 cursor-pointer bg-white text-emerald-800 shadow-xs border border-emerald-600";
+        const inactiveTabClass = "py-2 px-3 rounded-xl font-black text-center transition flex items-center justify-center gap-1.5 cursor-pointer text-slate-600 hover:text-slate-900 border border-transparent";
+
+        tabHadir.className = inactiveTabClass;
+        tabIzin.className = inactiveTabClass;
+        tabSingle.className = inactiveTabClass;
+
+        secHadir.classList.add('hidden');
+        secIzin.classList.add('hidden');
+        secSingle.classList.add('hidden');
+
+        if (mode === 'instan_hadir') {
+            tabHadir.className = activeTabClass;
+            secHadir.classList.remove('hidden');
+            wrapCatatan.classList.remove('hidden');
+            wrapFoto.classList.remove('hidden');
+            wrapOverwrite.classList.remove('hidden');
+            btnSubmit.className = "px-5 py-2.5 bg-[#064e3b] hover:bg-[#043d2e] text-white font-bold rounded-xl text-xs shadow-md transition flex items-center gap-2 border border-emerald-700 cursor-pointer";
+            btnLabel.innerText = "⚡ Simpan Hadir Lengkap (Semua Sesi)";
+            alasanInput.removeAttribute('required');
+        } else if (mode === 'instan_izin') {
+            tabIzin.className = "py-2 px-3 rounded-xl font-black text-center transition flex items-center justify-center gap-1.5 cursor-pointer bg-amber-500 text-slate-950 shadow-xs border border-amber-600 font-extrabold";
+            secIzin.classList.remove('hidden');
+            wrapCatatan.classList.remove('hidden');
+            wrapFoto.classList.add('hidden'); // Izin menggunakan dokumen pendukung di section izin
+            wrapOverwrite.classList.add('hidden');
+            btnSubmit.className = "px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs shadow-md transition flex items-center gap-2 border border-amber-500 cursor-pointer";
+            btnLabel.innerText = "⚡ Simpan Izin / Cuti 1 Hari";
+            alasanInput.setAttribute('required', 'required');
         } else {
-            tabBatch.className = "pb-2.5 font-bold text-xs border-b-2 border-emerald-700 text-emerald-800 transition flex items-center gap-1.5 cursor-pointer";
-            tabSingle.className = "pb-2.5 font-bold text-xs border-b-2 border-transparent text-slate-500 hover:text-slate-800 transition flex items-center gap-1.5 cursor-pointer";
-            secSingle.classList.add('hidden');
-            secBatch.classList.remove('hidden');
+            tabSingle.className = "py-2 px-3 rounded-xl font-black text-center transition flex items-center justify-center gap-1.5 cursor-pointer bg-white text-indigo-800 shadow-xs border border-indigo-600 font-extrabold";
+            secSingle.classList.remove('hidden');
+            wrapCatatan.classList.remove('hidden');
+            wrapFoto.classList.remove('hidden');
+            wrapOverwrite.classList.remove('hidden');
+            btnSubmit.className = "px-5 py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white font-bold rounded-xl text-xs shadow-md transition flex items-center gap-2 border border-indigo-600 cursor-pointer";
+            btnLabel.innerText = "Simpan 1 Sesi Presensi";
+            alasanInput.removeAttribute('required');
         }
     }
 
@@ -1117,15 +1229,18 @@
 
     // Tangani perubahan tanggal di modal input manual jika diperlukan
     function handleDateChange(dateStr) {
-        // Jika hari jumat, jam pulang standar 16:30
+        if (!dateStr) return;
         const dateObj = new Date(dateStr);
         const dayOfWeek = dateObj.getDay(); // 5 is Friday
+        const istirahatInput = document.getElementById('hadir_jam_istirahat');
+        const pulangInput = document.getElementById('hadir_jam_pulang');
+
         if (dayOfWeek === 5) {
-            document.getElementById('batch_jam_istirahat').value = '11:30';
-            document.getElementById('batch_jam_pulang').value = '16:30';
+            if (istirahatInput) istirahatInput.value = '11:30';
+            if (pulangInput) pulangInput.value = '16:30';
         } else {
-            document.getElementById('batch_jam_istirahat').value = '12:00';
-            document.getElementById('batch_jam_pulang').value = '17:00';
+            if (istirahatInput) istirahatInput.value = '12:00';
+            if (pulangInput) pulangInput.value = '17:00';
         }
     }
 </script>

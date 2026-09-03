@@ -2074,11 +2074,21 @@ class OperatorController extends Controller
         $selectedDate = $tanggal ?: Carbon::today()->format('Y-m-d');
         $schedule = Schedule::getScheduleForDate($selectedDate);
 
+        // Data Cuti / Izin Pegawai yang disetujui pada tanggal terpilih
+        $leavesToday = Leave::with('user')
+            ->whereDate('tanggal_mulai', '<=', $selectedDate)
+            ->whereDate('tanggal_selesai', '>=', $selectedDate)
+            ->where('status', 'disetujui')
+            ->get();
+        $totalLeavesToday = $leavesToday->count();
+
         return view('operator.attendances.index', compact(
             'attendances',
             'employees',
             'setting',
             'schedule',
+            'leavesToday',
+            'totalLeavesToday',
             'tanggal',
             'user_id',
             'tipe',
@@ -2095,7 +2105,7 @@ class OperatorController extends Controller
     }
 
     /**
-     * Menyimpan input presensi manual oleh operator (Mendukung Sesi Tunggal & Input Lengkap 1 Hari).
+     * Menyimpan input presensi manual oleh operator (Mendukung Paket Hadir 1 Hari, Paket Izin/Sakit/Cuti 1 Hari, & Sesi Tunggal).
      *
      * @param Request $request
      * @return \Illuminate\Http\RedirectResponse
@@ -2110,28 +2120,103 @@ class OperatorController extends Controller
         $alamat = 'Input Manual oleh Operator (' . $officeName . ')';
 
         // -------------------------------------------------------------
-        // MODE BATCH: Input Lengkap Sekaligus Beberapa Sesi Dalam 1 Hari
+        // 1. PAKET INSTAN IZIN / SAKIT / CUTI 1 HARI PENUH (IZIN SEMUA)
         // -------------------------------------------------------------
-        if ($modeInput === 'batch') {
+        if ($modeInput === 'instan_izin' || $modeInput === 'leave') {
+            $validated = $request->validate([
+                'user_id' => 'required|exists:users,id',
+                'tanggal' => 'required|date', // Boleh tanggal kapan saja untuk operator/admin
+                'jenis_cuti' => 'required|in:cuti_sakit,cuti_alasan_penting,cuti_tahunan,cuti_luar_negeri,cuti_lainnya',
+                'alasan' => 'required|string|max:1000',
+                'catatan_operator' => 'nullable|string|max:500',
+                'dokumen' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
+            ], [
+                'user_id.required' => 'Pegawai wajib dipilih.',
+                'tanggal.required' => 'Tanggal izin/cuti wajib diisi.',
+                'jenis_cuti.required' => 'Kategori izin/cuti wajib dipilih.',
+                'alasan.required' => 'Keterangan atau alasan izin/cuti wajib diisi.',
+                'dokumen.max' => 'Ukuran berkas dokumen pendukung maksimal 5MB.',
+            ]);
+
+            $user = User::findOrFail($validated['user_id']);
+            $tanggal = $validated['tanggal'];
+            $jenisCuti = $validated['jenis_cuti'];
+            $alasan = $validated['alasan'];
+
+            $docPath = null;
+            if ($request->hasFile('dokumen') && $request->file('dokumen')->isValid()) {
+                $folder = 'uploads/dokumen_cuti';
+                $fullFolder = public_path($folder);
+                if (!File::exists($fullFolder)) {
+                    File::makeDirectory($fullFolder, 0755, true, true);
+                }
+                $file = $request->file('dokumen');
+                $ext = strtolower($file->getClientOriginalExtension() ?: 'pdf');
+                $filename = 'cuti_' . $user->id . '_' . time() . '_' . uniqid() . '.' . $ext;
+                $file->move($fullFolder, $filename);
+                $docPath = $folder . '/' . $filename;
+            }
+
+            // Periksa apakah sudah ada catatan izin/cuti untuk pegawai ini pada tanggal tersebut
+            $existingLeave = Leave::where('user_id', $user->id)
+                ->whereDate('tanggal_mulai', '<=', $tanggal)
+                ->whereDate('tanggal_selesai', '>=', $tanggal)
+                ->first();
+
+            if ($existingLeave) {
+                $existingLeave->update([
+                    'jenis_cuti' => $jenisCuti,
+                    'alasan' => $alasan,
+                    'status' => 'disetujui',
+                    'catatan_operator' => $validated['catatan_operator'] ?: 'Input manual oleh operator',
+                    ...($docPath ? ['dokumen_pendukung' => $docPath] : []),
+                ]);
+            } else {
+                Leave::create([
+                    'user_id' => $user->id,
+                    'jenis_cuti' => $jenisCuti,
+                    'tanggal_mulai' => $tanggal,
+                    'tanggal_selesai' => $tanggal,
+                    'jumlah_hari' => 1,
+                    'alasan' => $alasan,
+                    'dokumen_pendukung' => $docPath,
+                    'status' => 'disetujui',
+                    'catatan_operator' => $validated['catatan_operator'] ?: 'Input manual oleh operator',
+                ]);
+            }
+
+            $labelJenis = Leave::getJenisCutiLabel($jenisCuti);
+            return redirect()->route('operator.attendances.index', ['tanggal' => $tanggal])
+                ->with('success', "Paket Izin 1 Hari: Data {$labelJenis} untuk pegawai {$user->name} berhasil dicatat (1 hari penuh disetujui)!");
+        }
+
+        // -------------------------------------------------------------
+        // 2. PAKET INSTAN HADIR 1 HARI PENUH (HADIR SEMUA SESI) / BATCH
+        // -------------------------------------------------------------
+        if ($modeInput === 'instan_hadir' || $modeInput === 'batch') {
             $validated = $request->validate([
                 'user_id' => 'required|exists:users,id',
                 'tanggal' => 'required|date',
-                'sessions' => 'required|array|min:1',
-                'sessions.*' => 'in:masuk,istirahat,masuk_istirahat,pulang',
+                'sessions' => 'nullable|array',
                 'catatan_operator' => 'nullable|string|max:500',
                 'foto' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:5120',
             ], [
                 'user_id.required' => 'Pegawai wajib dipilih.',
                 'tanggal.required' => 'Tanggal presensi wajib diisi.',
-                'sessions.required' => 'Pilih minimal satu sesi presensi yang ingin diinput.',
                 'foto.max' => 'Ukuran berkas foto maksimal 5MB.',
             ]);
 
             $user = User::findOrFail($validated['user_id']);
             $tanggal = $validated['tanggal'];
             $schedule = Schedule::getScheduleForDate($tanggal);
-            $overwrite = $request->boolean('overwrite', false);
-            $catatan = $validated['catatan_operator'] ?: 'Input manual oleh operator';
+            $overwrite = $request->boolean('overwrite', true);
+            $catatan = $validated['catatan_operator'] ?: 'Input manual paket hadir 1 hari penuh oleh operator';
+
+            // Sesi yang akan dicatat: default 4 sesi lengkap jika tidak dibatasi
+            $sessions = $request->input('sessions');
+            if (empty($sessions) || $modeInput === 'instan_hadir') {
+                $sessions = ['masuk', 'istirahat', 'masuk_istirahat', 'pulang'];
+            }
 
             // Upload foto bukti pendukung jika ada
             $sharedFoto = 'images/manual_attendance.png';
@@ -2143,16 +2228,15 @@ class OperatorController extends Controller
                 }
                 $file = $request->file('foto');
                 $ext = strtolower($file->getClientOriginalExtension() ?: 'jpg');
-                $filename = 'manual_' . $user->id . '_batch_' . time() . '_' . uniqid() . '.' . $ext;
+                $filename = 'manual_' . $user->id . '_hadir_full_' . time() . '_' . uniqid() . '.' . $ext;
                 $file->move($fullFolder, $filename);
                 $sharedFoto = $folder . '/' . $filename;
             }
 
             $createdCount = 0;
             $updatedCount = 0;
-            $skippedCount = 0;
 
-            foreach ($validated['sessions'] as $tipe) {
+            foreach ($sessions as $tipe) {
                 // Jam target atau jam kustom yang diinputkan
                 $jamInput = $request->input("jam_{$tipe}");
                 if (empty($jamInput)) {
@@ -2203,8 +2287,6 @@ class OperatorController extends Controller
                         }
                         $existing->update($updateData);
                         $updatedCount++;
-                    } else {
-                        $skippedCount++;
                     }
                 } else {
                     Attendance::create([
@@ -2225,13 +2307,8 @@ class OperatorController extends Controller
                 }
             }
 
-            $summary = [];
-            if ($createdCount > 0) $summary[] = "{$createdCount} sesi baru dibuat";
-            if ($updatedCount > 0) $summary[] = "{$updatedCount} sesi diperbarui";
-            if ($skippedCount > 0) $summary[] = "{$skippedCount} sesi dilewati (sudah ada)";
-
             return redirect()->route('operator.attendances.index', ['tanggal' => $tanggal])
-                ->with('success', 'Presensi manual pegawai ' . $user->name . ' berhasil diproses (' . implode(', ', $summary) . ').');
+                ->with('success', "Paket Hadir 1 Hari: Presensi 4 sesi lengkap untuk {$user->name} berhasil disimpan (Hadir Semua)!");
         }
 
         // -------------------------------------------------------------
