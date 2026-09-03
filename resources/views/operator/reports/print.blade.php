@@ -28,17 +28,47 @@
             box-sizing: border-box;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
-            font-family: 'Times New Roman', Times, serif !important;
         }
 
         body {
-            font-family: 'Times New Roman', Times, serif !important;
+            font-family: 'Times New Roman', Times, serif;
             margin: 0;
             padding: 0;
             background-color: #f1f5f9;
             color: #000000;
             font-size: 11pt;
             line-height: 1.35;
+        }
+
+        .paper-container,
+        .paper-container table,
+        .paper-container th,
+        .paper-container td,
+        .paper-container p,
+        .paper-container h1,
+        .paper-container h2,
+        .paper-container h3,
+        .paper-container h4,
+        .paper-container div,
+        .paper-container span,
+        .paper-container ul,
+        .paper-container li {
+            font-family: 'Times New Roman', Times, serif;
+        }
+
+        /* Toolbar Navigasi di Layar */
+        .toolbar, .toolbar button, .toolbar a, .toolbar span {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* Pastikan Ikon FontAwesome Berfungsi Normal dan Tidak Tertimpa Font */
+        i.fa-solid, i.fa-regular, i.fa-brands, .fa-solid, .fa-regular, .fa-brands, .fa, .fas, .far {
+            font-family: "Font Awesome 6 Free", "Font Awesome 6 Brands" !important;
+            font-style: normal !important;
+            font-weight: 900 !important;
+        }
+        i.fa-regular, .fa-regular, .far {
+            font-weight: 400 !important;
         }
 
         .paper-container {
