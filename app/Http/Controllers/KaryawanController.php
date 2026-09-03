@@ -450,15 +450,23 @@ class KaryawanController extends Controller
      */
     public function leaveStore(Request $request)
     {
+        // 1. Ambil data pegawai/user yang sedang aktif login
         $user = Auth::user();
 
+        // 2. Validasi input formulir pengajuan izin/cuti
         $validated = $request->validate([
+            // Memastikan jenis cuti yang dipilih sesuai kategori resmi
             'jenis_cuti' => 'required|in:cuti_tahunan,cuti_sakit,cuti_luar_negeri,cuti_alasan_penting,cuti_lainnya',
+            // PENTING: Aturan 'after_or_equal:today' mencegah user/pegawai mengajukan izin ke tanggal lampau
             'tanggal_mulai' => 'required|date|after_or_equal:today',
+            // Memastikan tanggal selesai tidak sebelum tanggal mulai
             'tanggal_selesai' => 'required|date|after_or_equal:tanggal_mulai',
+            // Alasan pengajuan wajib diisi (maksimal 1000 karakter)
             'alasan' => 'required|string|max:1000',
+            // Berkas pendukung (misal: surat dokter) bersifat opsional dengan ukuran maksimal 5MB
             'dokumen' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
         ], [
+            // Pesan peringatan dalam Bahasa Indonesia yang ramah pengguna
             'jenis_cuti.required' => 'Jenis izin/cuti wajib dipilih.',
             'tanggal_mulai.required' => 'Tanggal mulai izin/cuti wajib diisi.',
             'tanggal_mulai.after_or_equal' => 'Pengajuan izin/cuti tidak dapat dilakukan untuk tanggal yang telah lewat (hanya untuk hari ini atau tanggal mendatang).',
@@ -468,42 +476,55 @@ class KaryawanController extends Controller
             'dokumen.max' => 'Ukuran file dokumen pendukung maksimal 5MB.',
         ]);
 
+        // 3. Konversi string tanggal menjadi objek Carbon untuk menghitung jumlah hari pengajuan
         $start = Carbon::parse($validated['tanggal_mulai']);
         $end = Carbon::parse($validated['tanggal_selesai']);
+        // Hitung selisih hari inklusif (+1 hari)
         $jumlahHari = $start->diffInDays($end) + 1;
 
-        // Penyimpanan dokumen pendukung jika dilampirkan (misal: surat keterangan dokter)
+        // 4. Proses penyimpanan dokumen lampiran jika diunggah oleh user
         $docPath = null;
         if ($request->hasFile('dokumen') && $request->file('dokumen')->isValid()) {
+            // Tentukan folder penyimpanan dokumen cuti
             $folder = 'uploads/dokumen_cuti';
             $fullFolder = public_path($folder);
+
+            // Buat folder jika belum ada di direktori server
             if (!File::exists($fullFolder)) {
                 File::makeDirectory($fullFolder, 0755, true, true);
             }
+
+            // Ambil berkas yang diunggah
             $file = $request->file('dokumen');
             $ext = strtolower($file->getClientOriginalExtension() ?: 'pdf');
+
+            // Validasi format ekstensi file
             if (!in_array($ext, ['pdf', 'jpg', 'jpeg', 'png'])) {
                 return back()->with('error', 'Format dokumen pendukung tidak didukung.');
             }
+
+            // Buat nama berkas unik
             $filename = 'cuti_' . $user->id . '_' . time() . '_' . uniqid() . '.' . $ext;
+            // Pindahkan file ke folder tujuan
             $file->move($fullFolder, $filename);
+            // Simpan path relatif untuk database
             $docPath = $folder . '/' . $filename;
         }
 
-        // Buat rekaman pengajuan cuti berstatus menunggu konfirmasi operator
+        // 5. Simpan rekaman permohonan cuti baru ke tabel 'leaves' dengan status awal 'menunggu'
         Leave::create([
-            'user_id' => $user->id,
-            'jenis_cuti' => $validated['jenis_cuti'],
-            'tanggal_mulai' => $validated['tanggal_mulai'],
-            'tanggal_selesai' => $validated['tanggal_selesai'],
-            'jumlah_hari' => $jumlahHari,
-            'alasan' => $validated['alasan'],
-            'dokumen_pendukung' => $docPath,
-            'status' => 'menunggu',
+            'user_id' => $user->id,                                 // ID user pemohon
+            'jenis_cuti' => $validated['jenis_cuti'],               // Kategori cuti
+            'tanggal_mulai' => $validated['tanggal_mulai'],         // Tanggal mulai
+            'tanggal_selesai' => $validated['tanggal_selesai'],     // Tanggal selesai
+            'jumlah_hari' => $jumlahHari,                           // Total hari
+            'alasan' => $validated['alasan'],                       // Alasan pengajuan
+            'dokumen_pendukung' => $docPath,                        // Path berkas dokumen
+            'status' => 'menunggu',                                 // Menunggu persetujuan operator/admin
         ]);
 
+        // 6. Redirect kembali ke halaman daftar izin/cuti dengan flash message sukses
         return redirect()->route('karyawan.cuti.index')
             ->with('success', 'Pengajuan Cuti berhasil dikirim! Menunggu persetujuan Operator.');
     }
 }
-

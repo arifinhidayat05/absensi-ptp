@@ -869,80 +869,107 @@
     }
 
     /**
-     * Menu Instan 1 Hari: Tepat Waktu Semua, Terlambat Semua, Izin Semua, Sakit Semua
+     * Menu Instan 1 Hari: Mengisi otomatis seluruh sesi dalam 1 kali klik tombol.
+     * Pilihan: Tepat Waktu Semua, Terlambat Semua, Izin Semua, atau Sakit Semua.
      */
     function applyPreset(presetType) {
+        // 1. Ambil elemen input tanggal dari formulir modal
         const dateInput = document.getElementById('create_tanggal');
+        // 2. Ambil nilai tanggal yang sedang dipilih (format YYYY-MM-DD)
         const dateStr = dateInput ? dateInput.value : '';
+        // 3. Tentukan variabel penanda apakah hari tersebut merupakan hari Jumat
         let isFriday = false;
         if (dateStr) {
             const d = new Date(dateStr);
+            // Angka 5 pada getDay() adalah hari Jumat (0: Minggu, 1: Senin, ..., 5: Jumat)
             if (d.getDay() === 5) isFriday = true;
         }
 
+        // 4. Tentukan jam kerja acuan (Jumat istirahat 11:30, Senin-Kamis istirahat 12:00)
         const baseHours = isFriday ? scheduleHours.friday : scheduleHours.normal;
 
-        // Centang semua checkbox sesi
+        // 5. Centang otomatis ke-4 checkbox sesi presensi
         document.getElementById('check_masuk').checked = true;
         document.getElementById('check_istirahat').checked = true;
         document.getElementById('check_masuk_istirahat').checked = true;
         document.getElementById('check_pulang').checked = true;
 
+        // 6. Terapkan nilai jam dan status sesuai jenis tombol instan yang dipilih
         if (presetType === 'tepat_waktu') {
+            // Sesi Masuk: Jam masuk standar & status tepat waktu
             document.getElementById('session_jam_masuk').value = baseHours.masuk;
             document.getElementById('session_status_masuk').value = 'tepat_waktu';
 
+            // Sesi Istirahat: Jam istirahat standar & status tepat waktu
             document.getElementById('session_jam_istirahat').value = baseHours.istirahat;
             document.getElementById('session_status_istirahat').value = 'tepat_waktu';
 
+            // Sesi Masuk Istirahat: Jam masuk istirahat standar & status tepat waktu
             document.getElementById('session_jam_masuk_istirahat').value = baseHours.masuk_istirahat;
             document.getElementById('session_status_masuk_istirahat').value = 'tepat_waktu';
 
+            // Sesi Pulang: Jam pulang standar & status tepat waktu
             document.getElementById('session_jam_pulang').value = baseHours.pulang;
             document.getElementById('session_status_pulang').value = 'tepat_waktu';
 
+            // Isi catatan ringkasan otomatis
             document.getElementById('create_catatan_operator').value = 'Hadir lengkap 1 hari (tepat waktu)';
         } else if (presetType === 'terlambat') {
+            // Sesi Masuk: Jam terlambat (08:35) & status terlambat
             document.getElementById('session_jam_masuk').value = scheduleHours.late.masuk;
             document.getElementById('session_status_masuk').value = 'terlambat';
 
+            // Sesi Istirahat: Jam istirahat standar & status lebih awal
             document.getElementById('session_jam_istirahat').value = baseHours.istirahat;
             document.getElementById('session_status_istirahat').value = 'lebih_awal';
 
+            // Sesi Masuk Istirahat: Jam terlambat (13:35) & status terlambat
             document.getElementById('session_jam_masuk_istirahat').value = scheduleHours.late.masuk_istirahat;
             document.getElementById('session_status_masuk_istirahat').value = 'terlambat';
 
+            // Sesi Pulang: Jam pulang lebih awal (16:45) & status lebih awal
             document.getElementById('session_jam_pulang').value = scheduleHours.late.pulang;
             document.getElementById('session_status_pulang').value = 'lebih_awal';
 
+            // Isi catatan ringkasan otomatis
             document.getElementById('create_catatan_operator').value = 'Hadir terlambat';
         } else if (presetType === 'izin') {
+            // Sesi Masuk: Status diset IZIN
             document.getElementById('session_jam_masuk').value = baseHours.masuk;
             document.getElementById('session_status_masuk').value = 'izin';
 
+            // Sesi Istirahat: Status diset IZIN
             document.getElementById('session_jam_istirahat').value = baseHours.istirahat;
             document.getElementById('session_status_istirahat').value = 'izin';
 
+            // Sesi Masuk Istirahat: Status diset IZIN
             document.getElementById('session_jam_masuk_istirahat').value = baseHours.masuk_istirahat;
             document.getElementById('session_status_masuk_istirahat').value = 'izin';
 
+            // Sesi Pulang: Status diset IZIN
             document.getElementById('session_jam_pulang').value = baseHours.pulang;
             document.getElementById('session_status_pulang').value = 'izin';
 
+            // Isi catatan ringkasan otomatis
             document.getElementById('create_catatan_operator').value = 'Izin tidak hadir 1 hari';
         } else if (presetType === 'sakit') {
+            // Sesi Masuk: Status diset SAKIT
             document.getElementById('session_jam_masuk').value = baseHours.masuk;
             document.getElementById('session_status_masuk').value = 'sakit';
 
+            // Sesi Istirahat: Status diset SAKIT
             document.getElementById('session_jam_istirahat').value = baseHours.istirahat;
             document.getElementById('session_status_istirahat').value = 'sakit';
 
+            // Sesi Masuk Istirahat: Status diset SAKIT
             document.getElementById('session_jam_masuk_istirahat').value = baseHours.masuk_istirahat;
             document.getElementById('session_status_masuk_istirahat').value = 'sakit';
 
+            // Sesi Pulang: Status diset SAKIT
             document.getElementById('session_jam_pulang').value = baseHours.pulang;
             document.getElementById('session_status_pulang').value = 'sakit';
 
+            // Isi catatan ringkasan otomatis
             document.getElementById('create_catatan_operator').value = 'Sakit tidak hadir 1 hari';
         }
     }

@@ -2158,58 +2158,106 @@ class OperatorController extends Controller
     }
 
     /**
-     * Menyimpan input presensi manual oleh operator (Mendukung kombinasi status per sesi: tepat waktu, terlambat, izin, sakit).
+     * Menyimpan input presensi manual oleh operator.
+     * Mendukung kombinasi status per sesi: tepat waktu, terlambat, lebih awal, izin, atau sakit.
      *
      * @param Request $request
      * @return \Illuminate\Http\RedirectResponse
      */
     public function attendanceManualStore(Request $request)
     {
+        // 1. Validasi data formulir yang dikirim oleh operator
         $validated = $request->validate([
+            // Memastikan pegawai yang dipilih terdaftar di database tabel users
             'user_id' => 'required|exists:users,id',
+            // Memastikan tanggal valid (operator bebas memilih tanggal lampau maupun mendatang)
             'tanggal' => 'required|date',
+            // Memastikan minimal ada 1 sesi presensi yang dicentang untuk disimpan
             'sessions' => 'required|array|min:1',
+            // Memastikan nama sesi hanya di antara 4 tipe resmi
             'sessions.*' => 'in:masuk,istirahat,masuk_istirahat,pulang',
+            // Catatan operator bersifat opsional, maksimal 500 karakter
             'catatan_operator' => 'nullable|string|max:500',
+            // Foto bukti surat izin/sakit bersifat opsional dengan batas maksimal 5MB
             'foto' => 'nullable|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
         ], [
+            // Pesan kustom dalam Bahasa Indonesia jika validasi tidak terpenuhi
             'user_id.required' => 'Pegawai wajib dipilih.',
             'tanggal.required' => 'Tanggal presensi wajib diisi.',
             'sessions.required' => 'Pilih minimal satu sesi presensi yang ingin disimpan.',
             'foto.max' => 'Ukuran berkas foto maksimal 5MB.',
         ]);
 
+        // 2. Ambil data model Pegawai berdasarkan ID yang dipilih
         $user = User::findOrFail($validated['user_id']);
+
+        // 3. Simpan tanggal yang dipilih ke dalam variabel
         $tanggal = $validated['tanggal'];
+
+        // 4. Ambil jadwal kantor untuk tanggal tersebut (mengetahui jam masuk, istirahat, dan pulang standar)
         $schedule = Schedule::getScheduleForDate($tanggal);
+
+        // 5. Ambil data konfigurasi kantor (koordinat GPS dan nama kantor)
         $setting = Setting::getOfficeSetting();
+
+        // 6. Koordinat latitude kantor (default koordinat PT Pontianak jika belum diatur)
         $lat = $setting->latitude_kantor ?: -0.026330;
+
+        // 7. Koordinat longitude kantor (default koordinat PT Pontianak jika belum diatur)
         $lng = $setting->longitude_kantor ?: 109.342500;
+
+        // 8. Nama kantor untuk dicantumkan pada riwayat presensi
         $officeName = $setting->nama_kantor ?: 'Kantor PT Pontianak';
+
+        // 9. Format teks alamat yang menandakan rekaman dibuat secara manual oleh operator
         $alamat = 'Input Manual oleh Operator (' . $officeName . ')';
+
+        // 10. Catatan keterangan operator (menggunakan default jika tidak diisi)
         $catatan = $validated['catatan_operator'] ?: 'Input manual oleh operator';
 
-        // Upload foto jika ada
+        // 11. Inisialisasi path gambar default (lencana resmi presensi manual terverifikasi)
         $fotoPath = 'images/manual_attendance.png';
+
+        // 12. Cek apakah ada file foto bukti atau surat keterangan yang diunggah
         if ($request->hasFile('foto') && $request->file('foto')->isValid()) {
+            // Tentukan folder penyimpanan berkas
             $folder = 'uploads/absensi';
             $fullFolder = public_path($folder);
+
+            // Buat folder secara otomatis jika belum ada di server
             if (!File::exists($fullFolder)) {
                 File::makeDirectory($fullFolder, 0755, true, true);
             }
+
+            // Ambil instance berkas yang diunggah
             $file = $request->file('foto');
+
+            // Ambil ekstensi file asli (misal: jpg, png, pdf)
             $ext = strtolower($file->getClientOriginalExtension() ?: 'jpg');
+
+            // Buat nama file unik agar tidak bertabrakan dengan file lain
             $filename = 'manual_' . $user->id . '_' . time() . '_' . uniqid() . '.' . $ext;
+
+            // Pindahkan file ke folder public server
             $file->move($fullFolder, $filename);
+
+            // Simpan lokasi file relatif untuk disimpan ke database
             $fotoPath = $folder . '/' . $filename;
         }
 
+        // 13. Variabel counter untuk menghitung jumlah sesi baru dan sesi yang diperbarui
         $createdCount = 0;
         $updatedCount = 0;
+
+        // 14. Array untuk menampung riwayat status yang diinputkan (guna keperluan sinkronisasi ke tabel cuti)
         $statusesUsed = [];
 
+        // 15. Lakukan looping untuk setiap sesi yang dipilih oleh operator
         foreach ($validated['sessions'] as $tipe) {
+            // Ambil input jam spesifik untuk sesi ini (misal: jam_masuk, jam_istirahat, dll.)
             $jamInput = $request->input("jam_{$tipe}");
+
+            // Jika jam dikosongkan, gunakan jam standar instansi dari database jadwal
             if (empty($jamInput)) {
                 $jamInput = match ($tipe) {
                     'masuk' => substr($schedule->jam_masuk, 0, 5),
@@ -2220,64 +2268,87 @@ class OperatorController extends Controller
                 };
             }
 
+            // Gabungkan tanggal dan jam menjadi objek DateTime Carbon lengkap
             $waktu = Carbon::parse($tanggal . ' ' . $jamInput);
 
-            // Ambil status sesi: tepat_waktu, terlambat, lebih_awal, izin, sakit
+            // Ambil status pilihan operator untuk sesi ini (default: tepat_waktu)
             $statusInput = $request->input("status_{$tipe}", 'tepat_waktu');
+
+            // Pastikan nilai status valid sesuai daftar enum database
             if (!in_array($statusInput, ['tepat_waktu', 'terlambat', 'lebih_awal', 'izin', 'sakit'])) {
                 $statusInput = 'tepat_waktu';
             }
+
+            // Simpan status ke array untuk pengecekan paket penuh
             $statusesUsed[] = $statusInput;
 
+            // Cari apakah data presensi pegawai pada tanggal dan sesi ini sudah ada sebelumnya
             $existing = Attendance::where('user_id', $user->id)
                 ->where('tanggal', $tanggal)
                 ->where('tipe', $tipe)
                 ->first();
 
+            // Jika rekaman sudah ada sebelumnya, lakukan UPDATE (pembaruan data)
             if ($existing) {
                 $updateData = [
-                    'waktu' => $waktu,
-                    'status' => $statusInput,
-                    'approval_status' => 'diterima',
-                    'catatan_operator' => $catatan,
-                    'alamat' => $alamat,
-                    'ip_address' => 'Manual (Operator)',
+                    'waktu' => $waktu,                                   // Perbarui waktu presensi
+                    'status' => $statusInput,                            // Perbarui status presensi
+                    'approval_status' => 'diterima',                     // Status disetujui langsung oleh operator
+                    'catatan_operator' => $catatan,                      // Catatan operator
+                    'alamat' => $alamat,                                 // Alamat lokasi
+                    'ip_address' => 'Manual (Operator)',                 // Penanda bahwa ini input manual
                 ];
+
+                // Jika operator mengunggah foto baru, perbarui kolom foto
                 if ($fotoPath !== 'images/manual_attendance.png') {
                     $updateData['foto'] = $fotoPath;
                 }
+
+                // Eksekusi update ke baris database
                 $existing->update($updateData);
+
+                // Tambahkan jumlah counter update
                 $updatedCount++;
             } else {
+                // Jika rekaman belum pernah ada, lakukan CREATE (membuat baris baru)
                 Attendance::create([
-                    'user_id' => $user->id,
-                    'tanggal' => $tanggal,
-                    'tipe' => $tipe,
-                    'waktu' => $waktu,
-                    'foto' => $fotoPath,
-                    'latitude' => $lat,
-                    'longitude' => $lng,
-                    'alamat' => $alamat,
-                    'ip_address' => 'Manual (Operator)',
-                    'status' => $statusInput,
-                    'approval_status' => 'diterima',
-                    'catatan_operator' => $catatan,
+                    'user_id' => $user->id,                             // ID pegawai
+                    'tanggal' => $tanggal,                               // Tanggal presensi
+                    'tipe' => $tipe,                                     // Sesi (masuk, istirahat, masuk_istirahat, pulang)
+                    'waktu' => $waktu,                                   // Timestamp tanggal dan jam
+                    'foto' => $fotoPath,                                 // Path foto bukti
+                    'latitude' => $lat,                                  // Latitude kantor
+                    'longitude' => $lng,                                 // Longitude kantor
+                    'alamat' => $alamat,                                 // Alamat kantor
+                    'ip_address' => 'Manual (Operator)',                 // Sumber input
+                    'status' => $statusInput,                            // Status (tepat_waktu, terlambat, izin, sakit)
+                    'approval_status' => 'diterima',                     // Status persetujuan
+                    'catatan_operator' => $catatan,                      // Keterangan operator
                 ]);
+
+                // Tambahkan jumlah counter data baru
                 $createdCount++;
             }
         }
 
-        // Sinkronisasi otomatis ke Leave jika seluruh sesi yang dicatat adalah izin atau sakit
+        // 16. Fitur Cerdas: Sinkronisasi Otomatis ke Modul Cuti & Izin (Tabel leaves)
+        // Jika seluruh sesi yang diinputkan semuanya berstatus 'izin' atau semuanya 'sakit'
         $uniqueStatuses = array_unique($statusesUsed);
         if (count($uniqueStatuses) === 1) {
             $singleStatus = $uniqueStatuses[0];
+
+            // Cek jika status seragam tersebut adalah sakit atau izin
             if ($singleStatus === 'sakit' || $singleStatus === 'izin') {
+                // Tentukan jenis cuti yang sesuai di tabel leaves
                 $jenisCuti = ($singleStatus === 'sakit') ? 'cuti_sakit' : 'cuti_alasan_penting';
+
+                // Cek apakah rekaman cuti sudah pernah ada pada tanggal tersebut
                 $existingLeave = Leave::where('user_id', $user->id)
                     ->whereDate('tanggal_mulai', '<=', $tanggal)
                     ->whereDate('tanggal_selesai', '>=', $tanggal)
                     ->first();
 
+                // Jika sudah ada rekaman cuti, perbarui statusnya menjadi disetujui
                 if ($existingLeave) {
                     $existingLeave->update([
                         'jenis_cuti' => $jenisCuti,
@@ -2285,6 +2356,7 @@ class OperatorController extends Controller
                         'catatan_operator' => $catatan,
                     ]);
                 } else {
+                    // Jika belum ada rekaman cuti, buatkan rekaman baru otomatis
                     Leave::create([
                         'user_id' => $user->id,
                         'jenis_cuti' => $jenisCuti,
@@ -2299,10 +2371,12 @@ class OperatorController extends Controller
             }
         }
 
+        // 17. Susun teks ringkasan untuk notifikasi sukses
         $summary = [];
         if ($createdCount > 0) $summary[] = "{$createdCount} sesi baru";
         if ($updatedCount > 0) $summary[] = "{$updatedCount} sesi diperbarui";
 
+        // 18. Redirect kembali ke halaman presensi dengan flash message sukses
         return redirect()->route('operator.attendances.index', ['tanggal' => $tanggal])
             ->with('success', 'Presensi pegawai ' . $user->name . ' tanggal ' . Carbon::parse($tanggal)->format('d/m/Y') . ' berhasil disimpan (' . implode(', ', $summary) . ')!');
     }
@@ -2349,19 +2423,36 @@ class OperatorController extends Controller
      * @param int $id
      * @return \Illuminate\Http\RedirectResponse
      */
+    /**
+     * Memperbarui rekaman data presensi pegawai (Edit Presensi oleh Operator).
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\RedirectResponse
+     */
     public function attendanceUpdate(Request $request, $id)
     {
+        // 1. Ambil rekaman presensi berdasarkan ID, sertakan relasi data pegawai
         $attendance = Attendance::with('user')->findOrFail($id);
 
+        // 2. Validasi input formulir pembaruan data
         $validated = $request->validate([
+            // Tanggal presensi wajib valid
             'tanggal' => 'required|date',
+            // Sesi presensi hanya boleh salah satu dari 4 sesi resmi
             'tipe' => 'required|in:masuk,istirahat,masuk_istirahat,pulang',
+            // Jam presensi wajib diisi
             'jam' => 'required',
+            // Status kehadiran yang diizinkan (mendukung izin dan sakit)
             'status' => 'required|in:tepat_waktu,terlambat,lebih_awal,izin,sakit',
+            // Status persetujuan operator: diterima atau ditolak
             'approval_status' => 'required|in:diterima,ditolak',
+            // Catatan perubahan bersifat opsional
             'catatan_operator' => 'nullable|string|max:500',
+            // Unggahan foto baru bersifat opsional (maks 5MB)
             'foto' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:5120',
         ], [
+            // Pesan error berbahasa Indonesia
             'tanggal.required' => 'Tanggal presensi wajib diisi.',
             'tipe.required' => 'Tipe sesi presensi wajib dipilih.',
             'jam.required' => 'Jam presensi wajib diisi.',
@@ -2370,29 +2461,32 @@ class OperatorController extends Controller
             'foto.max' => 'Ukuran berkas foto maksimal 5MB.',
         ]);
 
-        // Cek duplikasi jika tanggal atau sesi diubah bentrok dengan rekaman presensi lain milik pegawai
+        // 3. Cek potensi duplikasi composite key: pastikan sesi dan tanggal tidak bentrok dengan rekaman lain
         $duplicate = Attendance::where('user_id', $attendance->user_id)
             ->where('tanggal', $validated['tanggal'])
             ->where('tipe', $validated['tipe'])
             ->where('id', '!=', $id)
             ->first();
 
+        // Jika bentrok dengan sesi lain, batalkan proses dan beri pesan peringatan
         if ($duplicate) {
             return back()->with('error', 'Gagal memperbarui! Sudah ada rekaman presensi sesi ' . Attendance::getTipeLabel($validated['tipe']) . ' untuk pegawai ' . $attendance->user->name . ' pada tanggal ' . $validated['tanggal'] . ' (ID: #' . $duplicate->id . ').');
         }
 
+        // 4. Gabungkan tanggal dan jam menjadi format DateTime Carbon
         $waktu = Carbon::parse($validated['tanggal'] . ' ' . $validated['jam']);
 
+        // 5. Siapkan array data yang akan diperbarui
         $updateData = [
-            'tanggal' => $validated['tanggal'],
-            'tipe' => $validated['tipe'],
-            'waktu' => $waktu,
-            'status' => $validated['status'],
-            'approval_status' => $validated['approval_status'],
-            'catatan_operator' => $validated['catatan_operator'] ?? null,
+            'tanggal' => $validated['tanggal'],                               // Tanggal baru
+            'tipe' => $validated['tipe'],                                     // Tipe sesi baru
+            'waktu' => $waktu,                                               // Timestamp jam baru
+            'status' => $validated['status'],                                // Status baru (tepat_waktu/terlambat/izin/sakit)
+            'approval_status' => $validated['approval_status'],              // Status approval (diterima/ditolak)
+            'catatan_operator' => $validated['catatan_operator'] ?? null,    // Catatan operator
         ];
 
-        // Jika operator mengunggah foto bukti baru
+        // 6. Jika operator mengunggah berkas foto bukti pengganti yang baru
         if ($request->hasFile('foto') && $request->file('foto')->isValid()) {
             $folder = 'uploads/absensi';
             $fullFolder = public_path($folder);
@@ -2406,8 +2500,10 @@ class OperatorController extends Controller
             $updateData['foto'] = $folder . '/' . $filename;
         }
 
+        // 7. Eksekusi pembaruan data rekaman ke database
         $attendance->update($updateData);
 
+        // 8. Redirect kembali ke tabel presensi dengan pesan notifikasi sukses
         return redirect()->route('operator.attendances.index', ['tanggal' => $validated['tanggal']])
             ->with('success', 'Data presensi ' . Attendance::getTipeLabel($validated['tipe']) . ' untuk pegawai ' . $attendance->user->name . ' berhasil diperbarui!');
     }
