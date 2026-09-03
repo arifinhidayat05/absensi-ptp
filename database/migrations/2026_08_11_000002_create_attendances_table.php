@@ -21,7 +21,7 @@ return new class extends Migration
             $table->decimal('latitude', 10, 7);
             $table->decimal('longitude', 10, 7);
             $table->text('alamat')->nullable();
-            $table->enum('status', ['tepat_waktu', 'terlambat', 'lebih_awal'])->default('tepat_waktu');
+            $table->enum('status', ['tepat_waktu', 'terlambat', 'lebih_awal', 'izin', 'sakit'])->default('tepat_waktu');
             $table->timestamps();
 
             $table->unique(['user_id', 'tanggal', 'tipe']);

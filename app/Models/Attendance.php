@@ -148,7 +148,51 @@ class Attendance extends Model
             'tepat_waktu' => 'Tepat Waktu',
             'terlambat' => 'Terlambat',
             'lebih_awal' => 'Lebih Awal',
-            default => ucfirst($status),
+            'izin' => 'Izin',
+            'sakit' => 'Sakit',
+            default => ucfirst(str_replace('_', ' ', $status)),
+        };
+    }
+
+    /**
+     * Mendapatkan atribut lencana (badge) status kehadiran.
+     *
+     * @param string $status
+     * @return array
+     */
+    public static function getStatusBadge(string $status): array
+    {
+        return match ($status) {
+            'tepat_waktu' => [
+                'label' => 'Tepat Waktu',
+                'bg' => 'bg-emerald-100 text-emerald-800 border-emerald-300',
+                'icon' => 'fa-solid fa-check',
+            ],
+            'terlambat' => [
+                'label' => 'Terlambat',
+                'bg' => 'bg-amber-100 text-amber-800 border-amber-300',
+                'icon' => 'fa-solid fa-clock-rotate-left',
+            ],
+            'lebih_awal' => [
+                'label' => 'Lebih Awal',
+                'bg' => 'bg-teal-100 text-teal-800 border-teal-300',
+                'icon' => 'fa-solid fa-business-time',
+            ],
+            'izin' => [
+                'label' => 'Izin',
+                'bg' => 'bg-indigo-100 text-indigo-800 border-indigo-300',
+                'icon' => 'fa-solid fa-envelope-open-text',
+            ],
+            'sakit' => [
+                'label' => 'Sakit',
+                'bg' => 'bg-rose-100 text-rose-800 border-rose-300',
+                'icon' => 'fa-solid fa-notes-medical',
+            ],
+            default => [
+                'label' => ucfirst(str_replace('_', ' ', $status)),
+                'bg' => 'bg-slate-100 text-slate-800 border-slate-300',
+                'icon' => 'fa-solid fa-circle-info',
+            ],
         };
     }
 

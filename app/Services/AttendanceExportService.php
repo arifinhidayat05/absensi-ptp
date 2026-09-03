@@ -129,6 +129,10 @@ class AttendanceExportService
                             $countTerlambat++;
                         } elseif ($att->status === 'lebih_awal') {
                             $countLebihAwal++;
+                        } elseif ($att->status === 'sakit') {
+                            $countCutiSakit++;
+                        } elseif ($att->status === 'izin') {
+                            $countCutiLainnya++;
                         }
                     }
 
