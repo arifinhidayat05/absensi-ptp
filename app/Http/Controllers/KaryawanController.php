@@ -237,13 +237,14 @@ class KaryawanController extends Controller
             file_put_contents(public_path($filePath), $imageData);
         }
 
-        // 6. Penentuan status ketepatan waktu resmi:
-        // - Kecepatan absen masuk pagi (<= target): Tepat Waktu
-        // - Telat absen istirahat (>= target): Tepat Waktu
-        // - Kecepatan absen masuk setelah istirahat (<= target): Tepat Waktu
-        // - Telat absensi pulang (>= target): Tepat Waktu
+        // 6. Penentuan status ketepatan waktu resmi (mendukung batas toleransi keterlambatan):
+        // - Datang sebelum / pada batas toleransi: Tepat Waktu
+        // - Datang setelah batas toleransi: Terlambat
+        // - Pulang sebelum jam target: Lebih Awal
+        // - Pulang pada / setelah jam target: Tepat Waktu
         $targetDateTime = $windowInfo['target_datetime'];
-        $status = Attendance::determineStatus($request->tipe, $now, $targetDateTime);
+        $toleranceDateTime = $windowInfo['tolerance_datetime'] ?? null;
+        $status = Attendance::determineStatus($request->tipe, $now, $targetDateTime, $toleranceDateTime);
 
         // 7. Ekstraksi Alamat IP Klien (mendukung Cloudflare, Proxy, WiFi, dan IP Langsung)
         $rawForwarded = $request->header('X-Forwarded-For');

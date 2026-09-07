@@ -129,12 +129,13 @@ class OperatorController extends Controller
         }
 
         $activeSchedule = $daySchedules[$selectedHari] ?? $daySchedules['senin'];
+        $activeRules = Schedule::getRulesForDay($selectedHari);
 
-        return view('operator.schedules.index', compact('daySchedules', 'selectedHari', 'activeSchedule'));
+        return view('operator.schedules.index', compact('daySchedules', 'selectedHari', 'activeSchedule', 'activeRules'));
     }
 
     /**
-     * Menyimpan atau memperbarui jam kerja per hari (Senin s/d Jumat).
+     * Menyimpan atau memperbarui jam kerja per hari (Senin s/d Jumat) beserta jendela buka, tutup, dan batas toleransi.
      *
      * @param Request $request
      * @return \Illuminate\Http\RedirectResponse
@@ -149,21 +150,104 @@ class OperatorController extends Controller
             'jam_pulang' => 'required|date_format:H:i',
             'is_libur' => 'nullable|boolean',
             'keterangan' => 'nullable|string|max:255',
+
+            // Aturan jam buka, toleransi tepat waktu, dan jam tutup per sesi
+            'jam_buka_masuk' => 'nullable|date_format:H:i',
+            'jam_toleransi_masuk' => 'nullable|date_format:H:i',
+            'jam_tutup_masuk' => 'nullable|date_format:H:i',
+
+            'jam_buka_istirahat' => 'nullable|date_format:H:i',
+            'jam_toleransi_istirahat' => 'nullable|date_format:H:i',
+            'jam_tutup_istirahat' => 'nullable|date_format:H:i',
+
+            'jam_buka_masuk_istirahat' => 'nullable|date_format:H:i',
+            'jam_toleransi_masuk_istirahat' => 'nullable|date_format:H:i',
+            'jam_tutup_masuk_istirahat' => 'nullable|date_format:H:i',
+
+            'jam_buka_pulang' => 'nullable|date_format:H:i',
+            'jam_toleransi_pulang' => 'nullable|date_format:H:i',
+            'jam_tutup_pulang' => 'nullable|date_format:H:i',
+
+            'terapkan_semua_hari' => 'nullable|boolean',
         ]);
 
-        $validated['jam_masuk'] = $validated['jam_masuk'] . ':00';
-        $validated['jam_istirahat'] = $validated['jam_istirahat'] . ':00';
-        $validated['jam_masuk_istirahat'] = $validated['jam_masuk_istirahat'] . ':00';
-        $validated['jam_pulang'] = $validated['jam_pulang'] . ':00';
-        $validated['is_libur'] = $request->has('is_libur');
+        // Validasi integritas waktu: Jam Buka wajib lebih awal dari Jam Tutup untuk setiap sesi
+        foreach (['masuk', 'istirahat', 'masuk_istirahat', 'pulang'] as $s) {
+            $buka = $request->input("jam_buka_{$s}");
+            $tutup = $request->input("jam_tutup_{$s}");
+            if ($buka && $tutup && $buka >= $tutup) {
+                return back()->withInput()->withErrors([
+                    "jam_buka_{$s}" => 'Jam Buka untuk sesi ' . Attendance::getTipeLabel($s) . ' (' . $buka . ') harus lebih awal dari Jam Tutup (' . $tutup . ').'
+                ]);
+            }
+        }
+
+        $scheduleData = [
+            'hari' => $validated['hari'],
+            'jam_masuk' => $validated['jam_masuk'] . ':00',
+            'jam_istirahat' => $validated['jam_istirahat'] . ':00',
+            'jam_masuk_istirahat' => $validated['jam_masuk_istirahat'] . ':00',
+            'jam_pulang' => $validated['jam_pulang'] . ':00',
+            'is_libur' => $request->has('is_libur'),
+            'keterangan' => $validated['keterangan'] ?? null,
+        ];
 
         Schedule::updateOrCreate(
             ['hari' => $validated['hari']],
-            $validated
+            $scheduleData
         );
 
+        // Susun aturan jam buka, jam tutup, dan batas toleransi tepat waktu
+        $rules = [
+            'masuk' => [
+                'jam_buka' => $request->input('jam_buka_masuk', '06:30'),
+                'jam_toleransi' => $request->input('jam_toleransi_masuk', '08:59'),
+                'jam_tutup' => $request->input('jam_tutup_masuk', '11:00'),
+            ],
+            'istirahat' => [
+                'jam_buka' => $request->input('jam_buka_istirahat', ($validated['hari'] === 'jumat' ? '11:00' : '11:30')),
+                'jam_toleransi' => $request->input('jam_toleransi_istirahat', ($validated['hari'] === 'jumat' ? '11:30' : '12:00')),
+                'jam_tutup' => $request->input('jam_tutup_istirahat', '13:00'),
+            ],
+            'masuk_istirahat' => [
+                'jam_buka' => $request->input('jam_buka_masuk_istirahat', '12:30'),
+                'jam_toleransi' => $request->input('jam_toleransi_masuk_istirahat', '13:15'),
+                'jam_tutup' => $request->input('jam_tutup_masuk_istirahat', '14:30'),
+            ],
+            'pulang' => [
+                'jam_buka' => $request->input('jam_buka_pulang', ($validated['hari'] === 'jumat' ? '16:00' : '16:30')),
+                'jam_toleransi' => $request->input('jam_toleransi_pulang', ($validated['hari'] === 'jumat' ? '16:30' : '17:00')),
+                'jam_tutup' => $request->input('jam_tutup_pulang', '23:59'),
+            ],
+        ];
+
+        $applyAll = $request->has('terapkan_semua_hari');
+        Schedule::saveRulesForDay($validated['hari'], $rules, $applyAll);
+
+        if ($applyAll) {
+            foreach (['senin', 'selasa', 'rabu', 'kamis', 'jumat'] as $workDay) {
+                if ($workDay !== $validated['hari']) {
+                    Schedule::updateOrCreate(
+                        ['hari' => $workDay],
+                        [
+                            'jam_masuk' => $scheduleData['jam_masuk'],
+                            'jam_istirahat' => ($workDay === 'jumat') ? '11:30:00' : $scheduleData['jam_istirahat'],
+                            'jam_masuk_istirahat' => $scheduleData['jam_masuk_istirahat'],
+                            'jam_pulang' => ($workDay === 'jumat') ? '16:30:00' : $scheduleData['jam_pulang'],
+                            'is_libur' => false,
+                        ]
+                    );
+                }
+            }
+        }
+
+        $msg = 'Pengaturan jam kerja Hari ' . Schedule::getHariLabel($validated['hari']) . ' (Jam Target, Toleransi, & Jendela Buka/Tutup) berhasil disimpan!';
+        if ($applyAll) {
+            $msg .= ' Pengaturan juga diterapkan ke seluruh hari kerja (Senin s/d Jumat).';
+        }
+
         return redirect()->route('operator.schedules.index', ['hari' => $validated['hari']])
-            ->with('success', 'Pengaturan jam kerja Hari ' . Schedule::getHariLabel($validated['hari']) . ' berhasil disimpan!');
+            ->with('success', $msg);
     }
 
     /**

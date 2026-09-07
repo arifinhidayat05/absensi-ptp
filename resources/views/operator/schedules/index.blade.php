@@ -21,10 +21,10 @@
     <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
             <h1 class="text-xl font-black text-slate-900 flex items-center gap-2">
-                <i class="fa-solid fa-clock text-emerald-700"></i> Pengaturan Jam Kerja Fleksibel (Senin - Jumat)
+                <i class="fa-solid fa-clock text-emerald-700"></i> Pengaturan Jam Kerja &amp; Toleransi Presensi
             </h1>
             <p class="text-xs text-slate-500 mt-1">
-                Atur jadwal presensi per hari kerja. Jendela presensi otomatis dibuka <span class="font-bold text-emerald-700">15 menit sebelum</span> dan ditutup <span class="font-bold text-rose-600">15 menit setelah</span> jam target.
+                Atur jam target, jam dibuka, jam ditutup, dan batas toleransi keterlambatan. Pegawai yang absen dalam batas toleransi tetap dihitung <span class="font-bold text-emerald-700">Tepat Waktu</span>.
             </p>
         </div>
 
@@ -71,7 +71,7 @@
                         <i class="fa-solid fa-calendar-day"></i>
                     </div>
                     <div>
-                        <span class="text-xs uppercase tracking-wider font-bold text-emerald-800 block">Konfigurasi Jam Kerja</span>
+                        <span class="text-xs uppercase tracking-wider font-bold text-emerald-800 block">Konfigurasi Jam &amp; Toleransi</span>
                         <h2 class="text-xl font-black text-slate-900">
                             Hari {{ \App\Models\Schedule::getHariLabel($selectedHari) }}
                         </h2>
@@ -91,6 +91,19 @@
                 </div>
             </div>
 
+            <!-- Petunjuk Singkat Toleransi -->
+            <div class="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-900 space-y-1">
+                <div class="font-extrabold flex items-center gap-1.5 text-emerald-950">
+                    <i class="fa-solid fa-circle-info text-emerald-700"></i> Panduan Pengaturan Jam Buka, Tutup &amp; Toleransi:
+                </div>
+                <ul class="list-disc list-inside space-y-0.5 text-[11px] text-slate-700">
+                    <li><strong>Jam Dibuka</strong>: Waktu paling awal pegawai diizinkan menekan tombol absen.</li>
+                    <li><strong>Jam Target</strong>: Jam patokan resmi masuk/pulang kantor sesuai ketentuan.</li>
+                    <li><strong>Batas Toleransi Tepat Waktu</strong>: Jika masuk jam 08:00 dan toleransi diset 08:59, maka pegawai yang absen hingga <strong>08:59:59</strong> statusnya tetap <strong>TEPAT WAKTU</strong>. Baru setelah lewat jam tersebut tercatat <strong>TERLAMBAT</strong>.</li>
+                    <li><strong>Jam Ditutup</strong>: Pintu presensi dikunci. Setelah jam ini pegawai tidak dapat melakukan presensi mandiri.</li>
+                </ul>
+            </div>
+
             <form action="{{ route('operator.schedules.store') }}" method="POST" class="space-y-6">
                 @csrf
                 <input type="hidden" name="hari" value="{{ $selectedHari }}">
@@ -107,69 +120,236 @@
                     </label>
                 </div>
 
-                <!-- 4 Time Slots Inputs Grid -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <!-- 4 Sesi Cards Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
                     
-                    <!-- Jam Masuk -->
-                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                        <label for="jam_masuk" class="block text-xs font-extrabold text-slate-800 flex items-center justify-between">
-                            <span><i class="fa-solid fa-right-to-bracket text-emerald-700 me-1.5"></i> Jam Masuk:</span>
+                    <!-- 1. Sesi Jam Masuk -->
+                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                        <div class="flex items-center justify-between pb-2 border-b border-slate-200">
+                            <span class="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                                <i class="fa-solid fa-right-to-bracket text-emerald-700"></i> Sesi 1: Jam Masuk
+                            </span>
                             <span class="text-[10px] text-emerald-800 font-bold uppercase bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200">Check-In</span>
-                        </label>
-                        <input type="time" name="jam_masuk" id="jam_masuk" value="{{ old('jam_masuk', \Carbon\Carbon::parse($activeSchedule->jam_masuk)->format('H:i')) }}" required
-                            class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono font-bold text-slate-900 focus:ring-emerald-500 focus:border-emerald-500"
-                            onchange="calculateWindows()">
-                        <div class="text-[11px] text-slate-500 pt-1 border-t border-slate-200 flex justify-between">
-                            <span>Jendela Buka Auto:</span>
-                            <span id="win_masuk" class="font-bold text-emerald-800">--:-- - --:-- WIB</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <!-- Target Jam -->
+                            <div>
+                                <label for="jam_masuk" class="block text-[11px] font-bold text-slate-700 mb-1">
+                                    Target Jam Masuk:
+                                </label>
+                                <input type="time" name="jam_masuk" id="jam_masuk" value="{{ old('jam_masuk', \Carbon\Carbon::parse($activeSchedule->jam_masuk)->format('H:i')) }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Batas Toleransi Tepat Waktu -->
+                            <div>
+                                <label for="jam_toleransi_masuk" class="block text-[11px] font-extrabold text-emerald-800 mb-1 flex items-center justify-between">
+                                    <span>Batas Tepat Waktu:</span>
+                                    <i class="fa-solid fa-shield-halved text-emerald-600" title="Absen s/d jam ini tetap Tepat Waktu"></i>
+                                </label>
+                                <input type="time" name="jam_toleransi_masuk" id="jam_toleransi_masuk" value="{{ old('jam_toleransi_masuk', $activeRules['masuk']['jam_toleransi'] ?? '08:59') }}" required
+                                    class="w-full bg-emerald-50/80 border border-emerald-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-emerald-900 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Jam Dibuka -->
+                            <div>
+                                <label for="jam_buka_masuk" class="block text-[11px] font-semibold text-slate-600 mb-1">
+                                    Dibuka Pukul:
+                                </label>
+                                <input type="time" name="jam_buka_masuk" id="jam_buka_masuk" value="{{ old('jam_buka_masuk', $activeRules['masuk']['jam_buka'] ?? '06:30') }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-medium text-slate-800 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Jam Ditutup -->
+                            <div>
+                                <label for="jam_tutup_masuk" class="block text-[11px] font-semibold text-slate-600 mb-1">
+                                    Ditutup Pukul:
+                                </label>
+                                <input type="time" name="jam_tutup_masuk" id="jam_tutup_masuk" value="{{ old('jam_tutup_masuk', $activeRules['masuk']['jam_tutup'] ?? '11:00') }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-medium text-slate-800 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+                        </div>
+
+                        <div class="text-[10px] text-slate-500 pt-1.5 border-t border-slate-200">
+                            <i class="fa-solid fa-info-circle text-emerald-600 me-1"></i> Absen s/d <strong class="text-emerald-800 font-mono">{{ $activeRules['masuk']['jam_toleransi'] ?? '08:59' }}</strong> dihitung <strong>Tepat Waktu</strong>. Melewati batas ini status <strong>Terlambat</strong>.
                         </div>
                     </div>
 
-                    <!-- Jam Istirahat -->
-                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                        <label for="jam_istirahat" class="block text-xs font-extrabold text-slate-800 flex items-center justify-between">
-                            <span><i class="fa-solid fa-mug-hot text-amber-600 me-1.5"></i> Jam Istirahat:</span>
+                    <!-- 2. Sesi Jam Istirahat -->
+                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                        <div class="flex items-center justify-between pb-2 border-b border-slate-200">
+                            <span class="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                                <i class="fa-solid fa-mug-hot text-amber-600"></i> Sesi 2: Jam Istirahat
+                            </span>
                             <span class="text-[10px] text-amber-800 font-bold uppercase bg-amber-100 px-2 py-0.5 rounded border border-amber-200">Break Start</span>
-                        </label>
-                        <input type="time" name="jam_istirahat" id="jam_istirahat" value="{{ old('jam_istirahat', \Carbon\Carbon::parse($activeSchedule->jam_istirahat)->format('H:i')) }}" required
-                            class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono font-bold text-slate-900 focus:ring-emerald-500 focus:border-emerald-500"
-                            onchange="calculateWindows()">
-                        <div class="text-[11px] text-slate-500 pt-1 border-t border-slate-200 flex justify-between">
-                            <span>Jendela Buka Auto:</span>
-                            <span id="win_istirahat" class="font-bold text-emerald-800">--:-- - --:-- WIB</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <!-- Target Jam -->
+                            <div>
+                                <label for="jam_istirahat" class="block text-[11px] font-bold text-slate-700 mb-1">
+                                    Target Istirahat:
+                                </label>
+                                <input type="time" name="jam_istirahat" id="jam_istirahat" value="{{ old('jam_istirahat', \Carbon\Carbon::parse($activeSchedule->jam_istirahat)->format('H:i')) }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Batas Tepat Waktu -->
+                            <div>
+                                <label for="jam_toleransi_istirahat" class="block text-[11px] font-bold text-slate-700 mb-1">
+                                    Batas Tepat Waktu:
+                                </label>
+                                <input type="time" name="jam_toleransi_istirahat" id="jam_toleransi_istirahat" value="{{ old('jam_toleransi_istirahat', $activeRules['istirahat']['jam_toleransi'] ?? ($selectedHari === 'jumat' ? '11:30' : '12:00')) }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-slate-800 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Jam Dibuka -->
+                            <div>
+                                <label for="jam_buka_istirahat" class="block text-[11px] font-semibold text-slate-600 mb-1">
+                                    Dibuka Pukul:
+                                </label>
+                                <input type="time" name="jam_buka_istirahat" id="jam_buka_istirahat" value="{{ old('jam_buka_istirahat', $activeRules['istirahat']['jam_buka'] ?? ($selectedHari === 'jumat' ? '11:00' : '11:30')) }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-medium text-slate-800 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Jam Ditutup -->
+                            <div>
+                                <label for="jam_tutup_istirahat" class="block text-[11px] font-semibold text-slate-600 mb-1">
+                                    Ditutup Pukul:
+                                </label>
+                                <input type="time" name="jam_tutup_istirahat" id="jam_tutup_istirahat" value="{{ old('jam_tutup_istirahat', $activeRules['istirahat']['jam_tutup'] ?? '13:00') }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-medium text-slate-800 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+                        </div>
+
+                        <div class="text-[10px] text-slate-500 pt-1.5 border-t border-slate-200">
+                            <i class="fa-solid fa-info-circle text-amber-600 me-1"></i> Keluar mendahului target dihitung <strong>Lebih Awal</strong>. Pas/setelah jam istirahat dihitung <strong>Tepat Waktu</strong>.
                         </div>
                     </div>
 
-                    <!-- Jam Masuk Istirahat -->
-                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                        <label for="jam_masuk_istirahat" class="block text-xs font-extrabold text-slate-800 flex items-center justify-between">
-                            <span><i class="fa-solid fa-briefcase text-teal-700 me-1.5"></i> Jam Masuk Istirahat:</span>
+                    <!-- 3. Sesi Jam Masuk Istirahat -->
+                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                        <div class="flex items-center justify-between pb-2 border-b border-slate-200">
+                            <span class="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                                <i class="fa-solid fa-briefcase text-teal-700"></i> Sesi 3: Masuk Istirahat
+                            </span>
                             <span class="text-[10px] text-teal-800 font-bold uppercase bg-teal-100 px-2 py-0.5 rounded border border-teal-200">Break End</span>
-                        </label>
-                        <input type="time" name="jam_masuk_istirahat" id="jam_masuk_istirahat" value="{{ old('jam_masuk_istirahat', \Carbon\Carbon::parse($activeSchedule->jam_masuk_istirahat)->format('H:i')) }}" required
-                            class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono font-bold text-slate-900 focus:ring-emerald-500 focus:border-emerald-500"
-                            onchange="calculateWindows()">
-                        <div class="text-[11px] text-slate-500 pt-1 border-t border-slate-200 flex justify-between">
-                            <span>Jendela Buka Auto:</span>
-                            <span id="win_masuk_istirahat" class="font-bold text-emerald-800">--:-- - --:-- WIB</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <!-- Target Jam -->
+                            <div>
+                                <label for="jam_masuk_istirahat" class="block text-[11px] font-bold text-slate-700 mb-1">
+                                    Target Masuk Istirahat:
+                                </label>
+                                <input type="time" name="jam_masuk_istirahat" id="jam_masuk_istirahat" value="{{ old('jam_masuk_istirahat', \Carbon\Carbon::parse($activeSchedule->jam_masuk_istirahat)->format('H:i')) }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Batas Toleransi Tepat Waktu -->
+                            <div>
+                                <label for="jam_toleransi_masuk_istirahat" class="block text-[11px] font-extrabold text-teal-800 mb-1 flex items-center justify-between">
+                                    <span>Batas Tepat Waktu:</span>
+                                    <i class="fa-solid fa-shield-halved text-teal-600" title="Kembali istirahat s/d jam ini tetap Tepat Waktu"></i>
+                                </label>
+                                <input type="time" name="jam_toleransi_masuk_istirahat" id="jam_toleransi_masuk_istirahat" value="{{ old('jam_toleransi_masuk_istirahat', $activeRules['masuk_istirahat']['jam_toleransi'] ?? '13:15') }}" required
+                                    class="w-full bg-teal-50/80 border border-teal-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-teal-900 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Jam Dibuka -->
+                            <div>
+                                <label for="jam_buka_masuk_istirahat" class="block text-[11px] font-semibold text-slate-600 mb-1">
+                                    Dibuka Pukul:
+                                </label>
+                                <input type="time" name="jam_buka_masuk_istirahat" id="jam_buka_masuk_istirahat" value="{{ old('jam_buka_masuk_istirahat', $activeRules['masuk_istirahat']['jam_buka'] ?? '12:30') }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-medium text-slate-800 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Jam Ditutup -->
+                            <div>
+                                <label for="jam_tutup_masuk_istirahat" class="block text-[11px] font-semibold text-slate-600 mb-1">
+                                    Ditutup Pukul:
+                                </label>
+                                <input type="time" name="jam_tutup_masuk_istirahat" id="jam_tutup_masuk_istirahat" value="{{ old('jam_tutup_masuk_istirahat', $activeRules['masuk_istirahat']['jam_tutup'] ?? '14:30') }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-medium text-slate-800 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+                        </div>
+
+                        <div class="text-[10px] text-slate-500 pt-1.5 border-t border-slate-200">
+                            <i class="fa-solid fa-info-circle text-teal-600 me-1"></i> Kembali s/d <strong class="text-teal-800 font-mono">{{ $activeRules['masuk_istirahat']['jam_toleransi'] ?? '13:15' }}</strong> dihitung <strong>Tepat Waktu</strong>. Melewati batas ini status <strong>Terlambat</strong>.
                         </div>
                     </div>
 
-                    <!-- Jam Pulang -->
-                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                        <label for="jam_pulang" class="block text-xs font-extrabold text-slate-800 flex items-center justify-between">
-                            <span><i class="fa-solid fa-right-from-bracket text-emerald-700 me-1.5"></i> Jam Pulang:</span>
+                    <!-- 4. Sesi Jam Pulang -->
+                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                        <div class="flex items-center justify-between pb-2 border-b border-slate-200">
+                            <span class="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                                <i class="fa-solid fa-right-from-bracket text-emerald-700"></i> Sesi 4: Jam Pulang
+                            </span>
                             <span class="text-[10px] text-emerald-800 font-bold uppercase bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200">Check-Out</span>
-                        </label>
-                        <input type="time" name="jam_pulang" id="jam_pulang" value="{{ old('jam_pulang', \Carbon\Carbon::parse($activeSchedule->jam_pulang)->format('H:i')) }}" required
-                            class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono font-bold text-slate-900 focus:ring-emerald-500 focus:border-emerald-500"
-                            onchange="calculateWindows()">
-                        <div class="text-[11px] text-slate-500 pt-1 border-t border-slate-200 flex justify-between">
-                            <span>Jendela Buka Auto:</span>
-                            <span id="win_pulang" class="font-bold text-emerald-800">--:-- - --:-- WIB</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <!-- Target Jam -->
+                            <div>
+                                <label for="jam_pulang" class="block text-[11px] font-bold text-slate-700 mb-1">
+                                    Target Jam Pulang:
+                                </label>
+                                <input type="time" name="jam_pulang" id="jam_pulang" value="{{ old('jam_pulang', \Carbon\Carbon::parse($activeSchedule->jam_pulang)->format('H:i')) }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Batas Tepat Waktu / Pulang Kantor -->
+                            <div>
+                                <label for="jam_toleransi_pulang" class="block text-[11px] font-bold text-slate-700 mb-1">
+                                    Batas Tepat Waktu:
+                                </label>
+                                <input type="time" name="jam_toleransi_pulang" id="jam_toleransi_pulang" value="{{ old('jam_toleransi_pulang', $activeRules['pulang']['jam_toleransi'] ?? ($selectedHari === 'jumat' ? '16:30' : '17:00')) }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-slate-800 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Jam Dibuka -->
+                            <div>
+                                <label for="jam_buka_pulang" class="block text-[11px] font-semibold text-slate-600 mb-1">
+                                    Dibuka Pukul:
+                                </label>
+                                <input type="time" name="jam_buka_pulang" id="jam_buka_pulang" value="{{ old('jam_buka_pulang', $activeRules['pulang']['jam_buka'] ?? ($selectedHari === 'jumat' ? '16:00' : '16:30')) }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-medium text-slate-800 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+
+                            <!-- Jam Ditutup -->
+                            <div>
+                                <label for="jam_tutup_pulang" class="block text-[11px] font-semibold text-slate-600 mb-1">
+                                    Ditutup Pukul:
+                                </label>
+                                <input type="time" name="jam_tutup_pulang" id="jam_tutup_pulang" value="{{ old('jam_tutup_pulang', $activeRules['pulang']['jam_tutup'] ?? '23:59') }}" required
+                                    class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-medium text-slate-800 focus:ring-emerald-500 focus:border-emerald-500">
+                            </div>
+                        </div>
+
+                        <div class="text-[10px] text-slate-500 pt-1.5 border-t border-slate-200">
+                            <i class="fa-solid fa-info-circle text-emerald-600 me-1"></i> Pulang mendahului jam kantor dihitung <strong>Lebih Awal</strong>. Lembur / pulang setelahnya dihitung <strong>Tepat Waktu</strong>.
                         </div>
                     </div>
 
+                </div>
+
+                <!-- Terapkan ke Seluruh Hari Kerja Checkbox -->
+                <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
+                            <i class="fa-solid fa-copy"></i>
+                        </div>
+                        <div>
+                            <span class="text-xs font-black text-slate-900 block">Terapkan ke Seluruh Hari Kerja (Senin - Jumat)</span>
+                            <span class="text-[11px] text-slate-600">Salin otomatis jam target, toleransi keterlambatan, dan jendela buka/tutup hari {{ \App\Models\Schedule::getHariLabel($selectedHari) }} ini ke hari Senin s/d Jumat.</span>
+                        </div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input type="checkbox" name="terapkan_semua_hari" value="1" class="sr-only peer">
+                        <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                    </label>
                 </div>
 
                 <!-- Keterangan -->
@@ -181,8 +361,8 @@
                         class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-medium focus:ring-emerald-500 focus:border-emerald-500">
                 </div>
 
-                <button type="submit" class="w-full py-3.5 px-4 bg-[#064e3b] hover:bg-[#043d2e] text-white font-extrabold rounded-xl shadow-lg shadow-emerald-900/30 transition text-xs flex items-center justify-center gap-2 border border-emerald-700">
-                    <i class="fa-solid fa-floppy-disk text-amber-300 text-base"></i> SIMPAN JAM KERJA HARI {{ strtoupper(\App\Models\Schedule::getHariLabel($selectedHari)) }}
+                <button type="submit" class="w-full py-3.5 px-4 bg-[#064e3b] hover:bg-[#043d2e] text-white font-extrabold rounded-xl shadow-lg shadow-emerald-900/30 transition text-xs flex items-center justify-center gap-2 border border-emerald-700 cursor-pointer">
+                    <i class="fa-solid fa-floppy-disk text-amber-300 text-base"></i> SIMPAN JAM KERJA &amp; TOLERANSI HARI {{ strtoupper(\App\Models\Schedule::getHariLabel($selectedHari)) }}
                 </button>
             </form>
         </div>
@@ -190,7 +370,7 @@
         <!-- Weekly Summary Cards Sidebar (Senin - Jumat Overview) -->
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
             <h3 class="text-xs font-extrabold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
-                <i class="fa-solid fa-list-check text-emerald-700"></i> Summary Jam Kerja Mingguan
+                <i class="fa-solid fa-list-check text-emerald-700"></i> Ringkasan Jam &amp; Toleransi Mingguan
             </h3>
 
             <div class="space-y-2.5">
@@ -198,6 +378,7 @@
                     @php
                         $sc = $daySchedules[$dh];
                         $isCurrent = ($dh === $selectedHari);
+                        $dRules = \App\Models\Schedule::getRulesForDay($dh);
                     @endphp
                     <div class="p-3 rounded-xl border text-xs transition {{ $isCurrent ? 'bg-emerald-50 border-emerald-300 ring-2 ring-emerald-600/30' : 'bg-slate-50 border-slate-200' }}">
                         <div class="flex items-center justify-between font-bold text-slate-900 mb-1">
@@ -214,13 +395,17 @@
                             @endif
                         </div>
                         @if(!$sc->is_libur)
-                            <div class="text-[11px] text-slate-600 font-mono flex justify-between">
-                                <span>Masuk - Pulang:</span>
-                                <span class="font-bold text-slate-900">{{ \Carbon\Carbon::parse($sc->jam_masuk)->format('H:i') }} - {{ \Carbon\Carbon::parse($sc->jam_pulang)->format('H:i') }}</span>
+                            <div class="text-[11px] text-slate-700 font-mono flex justify-between">
+                                <span>Masuk:</span>
+                                <span class="font-bold text-slate-900">{{ \Carbon\Carbon::parse($sc->jam_masuk)->format('H:i') }} (Tol: {{ $dRules['masuk']['jam_toleransi'] ?? '08:59' }})</span>
                             </div>
-                            <div class="text-[10px] text-slate-500 flex justify-between">
-                                <span>Istirahat:</span>
-                                <span>{{ \Carbon\Carbon::parse($sc->jam_istirahat)->format('H:i') }} - {{ \Carbon\Carbon::parse($sc->jam_masuk_istirahat)->format('H:i') }}</span>
+                            <div class="text-[11px] text-slate-700 font-mono flex justify-between">
+                                <span>Pulang:</span>
+                                <span class="font-bold text-slate-900">{{ \Carbon\Carbon::parse($sc->jam_pulang)->format('H:i') }}</span>
+                            </div>
+                            <div class="text-[10px] text-slate-500 flex justify-between pt-1 border-t border-slate-200/80 mt-1">
+                                <span>Jendela Pagi:</span>
+                                <span class="font-semibold text-emerald-800">{{ $dRules['masuk']['jam_buka'] ?? '06:30' }} - {{ $dRules['masuk']['jam_tutup'] ?? '11:00' }}</span>
                             </div>
                         @else
                             <div class="text-[11px] text-slate-400 italic">Tidak ada presensi</div>
@@ -232,36 +417,4 @@
 
     </div>
 </div>
-
-@push('scripts')
-<script>
-    function addMinutesToTime(timeStr, minsToAdd) {
-        if (!timeStr) return '--:--';
-        const parts = timeStr.split(':');
-        let h = parseInt(parts[0], 10);
-        let m = parseInt(parts[1], 10);
-
-        let date = new Date();
-        date.setHours(h, m + minsToAdd, 0);
-
-        const newH = String(date.getHours()).padStart(2, '0');
-        const newM = String(date.getMinutes()).padStart(2, '0');
-        return `${newH}:${newM}`;
-    }
-
-    function calculateWindows() {
-        const types = ['masuk', 'istirahat', 'masuk_istirahat', 'pulang'];
-        types.forEach(t => {
-            const inputVal = document.getElementById('jam_' + t).value;
-            if (inputVal) {
-                const openTime = addMinutesToTime(inputVal, -15);
-                const closeTime = addMinutesToTime(inputVal, 15);
-                document.getElementById('win_' + t).innerText = `${openTime} - ${closeTime} WIB`;
-            }
-        });
-    }
-
-    document.addEventListener('DOMContentLoaded', calculateWindows);
-</script>
-@endpush
 @endsection

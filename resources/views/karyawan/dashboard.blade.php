@@ -95,8 +95,13 @@
                     <h2 class="text-lg sm:text-xl font-black text-slate-950 mt-0.5">
                         {{ $activeItem['label'] }}
                     </h2>
-                    <p class="text-xs font-bold text-slate-800">
-                        Target Jam: <span class="font-mono underline">{{ $activeWin['target_time'] }} WIB</span>
+                    <p class="text-xs font-bold text-slate-800 flex items-center gap-2 flex-wrap mt-0.5">
+                        <span>Target: <span class="font-mono underline">{{ $activeWin['target_time'] }} WIB</span></span>
+                        @if(isset($activeWin['tolerance_time']) && $activeWin['tolerance_time'] !== '--:--')
+                            <span class="px-2 py-0.5 rounded-full bg-emerald-950 text-amber-300 text-[10px] font-extrabold shadow-sm">
+                                <i class="fa-solid fa-shield-halved me-1 text-emerald-400"></i> Tepat Waktu s/d {{ $activeWin['tolerance_time'] }} WIB
+                            </span>
+                        @endif
                     </p>
                 </div>
             </div>
@@ -209,6 +214,14 @@
                             <span>Target Jam:</span>
                             <span class="font-bold text-slate-900">{{ $win['target_time'] }} WIB</span>
                         </div>
+                        @if(isset($win['tolerance_time']) && $win['tolerance_time'] !== '--:--')
+                            <div class="flex items-center justify-between text-[11px] bg-emerald-50 text-emerald-900 p-1.5 rounded-lg border border-emerald-200">
+                                <span class="font-semibold flex items-center gap-1">
+                                    <i class="fa-solid fa-shield-halved text-emerald-700"></i> Batas Tepat Waktu:
+                                </span>
+                                <span class="font-extrabold text-emerald-800 font-mono">s/d {{ $win['tolerance_time'] }} WIB</span>
+                            </div>
+                        @endif
                         <div class="flex items-center justify-between text-[11px] bg-slate-50 p-1.5 rounded-lg border border-slate-100">
                             <span>Jendela Buka:</span>
                             <span class="font-bold text-emerald-800">{{ $win['open_time'] }} - {{ $win['close_time'] }} WIB</span>

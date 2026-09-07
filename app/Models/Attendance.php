@@ -109,28 +109,33 @@ class Attendance extends Model
 
     /**
      * Menentukan status ketepatan waktu presensi berdasarkan aturan resmi instansi:
-     * 1. Jam Masuk Pagi: Datang lebih awal / pas jam target dihitung TEPAT WAKTU. Lewat jam target dihitung TERLAMBAT.
+     * 1. Jam Masuk Pagi: Datang lebih awal / sebelum batas toleransi dihitung TEPAT WAKTU. Lewat batas toleransi dihitung TERLAMBAT.
+     *    (Contoh: Target jam masuk 08:00, batas toleransi 08:59 -> absen sampai 08:59 tetap Tepat Waktu).
      * 2. Jam Istirahat: Keluar istirahat terlambat dihitung TEPAT WAKTU. Keluar mendahului jam istirahat dihitung LEBIH AWAL.
-     * 3. Masuk Istirahat: Kembali lebih awal / pas jam target dihitung TEPAT WAKTU. Lewat jam target dihitung TERLAMBAT.
+     * 3. Masuk Istirahat: Kembali lebih awal / sebelum batas toleransi dihitung TEPAT WAKTU. Lewat batas toleransi dihitung TERLAMBAT.
      * 4. Jam Pulang: Pulang terlambat (lembur) dihitung TEPAT WAKTU. Pulang mendahului jam kantor dihitung LEBIH AWAL.
      *
      * @param string $tipe Jenis sesi presensi ('masuk', 'istirahat', 'masuk_istirahat', 'pulang')
      * @param Carbon $attendanceTime Waktu aktual saat pegawai melakukan presensi
      * @param Carbon $targetDateTime Jam target resmi yang ditetapkan pada jadwal kerja
+     * @param Carbon|null $toleranceDateTime Batas waktu toleransi keterlambatan resmi
      * @return string 'tepat_waktu', 'terlambat', atau 'lebih_awal'
      */
-    public static function determineStatus(string $tipe, Carbon $attendanceTime, Carbon $targetDateTime): string
+    public static function determineStatus(string $tipe, Carbon $attendanceTime, Carbon $targetDateTime, ?Carbon $toleranceDateTime = null): string
     {
         if ($tipe === 'masuk' || $tipe === 'masuk_istirahat') {
-            // Datang lebih cepat (kecepatan masuk pagi atau kecepatan masuk istirahat) = Tepat Waktu
-            // Datang setelah melewati jam target = Terlambat
-            return $attendanceTime->gt($targetDateTime) ? 'terlambat' : 'tepat_waktu';
+            // Batas waktu status tepat waktu: jika batas toleransi ditentukan, gunakan toleransi, jika tidak gunakan target
+            $limitDateTime = $toleranceDateTime ?? $targetDateTime;
+            // Datang lebih awal atau sampai dengan batas toleransi = Tepat Waktu
+            // Datang setelah melewati batas toleransi = Terlambat
+            return $attendanceTime->gt($limitDateTime) ? 'terlambat' : 'tepat_waktu';
         }
 
         if ($tipe === 'istirahat' || $tipe === 'pulang') {
             // Keluar lebih lambat (telat absen istirahat atau telat absen pulang) = Tepat Waktu
             // Keluar mendahului jam target resmi = Lebih Awal
-            return $attendanceTime->lt($targetDateTime) ? 'lebih_awal' : 'tepat_waktu';
+            $limitDateTime = $toleranceDateTime ?? $targetDateTime;
+            return $attendanceTime->lt($limitDateTime) ? 'lebih_awal' : 'tepat_waktu';
         }
 
         return 'tepat_waktu';

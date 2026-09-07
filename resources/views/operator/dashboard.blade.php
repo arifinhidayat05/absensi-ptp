@@ -114,9 +114,11 @@
     <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <div class="flex items-center justify-between">
             <h2 class="text-sm font-bold uppercase tracking-wider text-slate-900 flex items-center gap-2">
-                <i class="fa-solid fa-clock text-emerald-700"></i> Status Jendela Waktu Buka/Tutup Presensi Hari Ini
+                <i class="fa-solid fa-clock text-emerald-700"></i> Status Jendela Waktu Buka/Tutup &amp; Toleransi Presensi Hari Ini
             </h2>
-            <span class="text-xs text-slate-500">Auto Rule: <strong class="text-emerald-800">15m Sebelum - 15m Setelah</strong> Target</span>
+            <a href="{{ route('operator.schedules.index') }}" class="text-xs font-bold text-emerald-800 hover:text-emerald-950 flex items-center gap-1 hover:underline">
+                <i class="fa-solid fa-gear text-emerald-600"></i> Atur Jam &amp; Toleransi
+            </a>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -145,8 +147,14 @@
                         <span>Jam Target:</span>
                         <span class="font-bold text-slate-900">{{ $win['target_time'] }} WIB</span>
                     </div>
+                    @if(isset($win['tolerance_time']) && $win['tolerance_time'] !== '--:--')
+                        <div class="text-[11px] text-emerald-800 flex justify-between bg-emerald-100/70 px-2 py-0.5 rounded">
+                            <span>Toleransi Tepat Waktu:</span>
+                            <span class="font-bold font-mono">s/d {{ $win['tolerance_time'] }} WIB</span>
+                        </div>
+                    @endif
                     <div class="text-slate-500 flex justify-between text-[11px]">
-                        <span>Buka Window:</span>
+                        <span>Jendela Buka:</span>
                         <span class="font-bold text-emerald-800">{{ $win['open_time'] }} - {{ $win['close_time'] }} WIB</span>
                     </div>
                 </div>
